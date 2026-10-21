@@ -1,0 +1,13 @@
+{
+  "ttl": 300,
+  "records": {
+    "campus.lab":      {"A": ["10.10.0.1"], "TXT": ["VIT Computer Networks lab zone"], "MX": [{"pref": 10, "host": "mail.campus.lab"}]},
+    "www.campus.lab":  {"CNAME": "web.campus.lab"},
+    "web.campus.lab":  {"A": ["10.10.0.10", "10.10.0.11"], "AAAA": ["fd00::10"]},
+    "mail.campus.lab": {"A": ["10.10.0.25"]},
+    "ftp.campus.lab":  {"A": ["10.10.0.30"]},
+    "echo.campus.lab": {"A": ["127.0.0.1"]},
+    "alias1.campus.lab": {"CNAME": "alias2.campus.lab"},
+    "alias2.campus.lab": {"CNAME": "web.campus.lab"}
+  }
+}

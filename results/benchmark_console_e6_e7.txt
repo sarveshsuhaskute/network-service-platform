@@ -1,0 +1,15 @@
+[e6] resource use with many idle connections
+  idle=0     rss=27.3 MB threads=8 echo p95=0.12 ms
+  idle=100   rss=32.5 MB threads=108 echo p95=0.11 ms
+  idle=250   rss=40.4 MB threads=258 echo p95=0.14 ms
+  idle=500   rss=53.4 MB threads=508 echo p95=0.23 ms
+  idle=1000  rss=79.5 MB threads=1008 echo p95=0.26 ms
+  idle=2000  rss=131.7 MB threads=2008 echo p95=0.31 ms
+    done in 15.0s
+[e6b] burst connection limit
+  burst limit: [343, 208, 210]
+    done in 0.3s
+[e7] failure detection
+  {"hung_server": 1.001, "crashed_server": 0.0, "connect_refused": 0.609, "udp_dead_server": 0.604, "server_idle_drop": 1.0}
+    done in 3.4s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json

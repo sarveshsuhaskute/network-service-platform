@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+storage/*
+!storage/.gitkeep
+.DS_Store
+copy.txt
+notes.txt

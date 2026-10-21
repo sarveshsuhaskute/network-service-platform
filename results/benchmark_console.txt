@@ -1,0 +1,81 @@
+[e1] response time vs payload size (TCP vs UDP)
+    done in 0.7s
+[e2] echo scalability vs concurrent clients
+  echo clients=1    11969 req/s p95=0.27 ms err=0 cpu=1%
+  echo clients=2    22246 req/s p95=0.25 ms err=0 cpu=2%
+  echo clients=5    37301 req/s p95=0.23 ms err=0 cpu=10%
+  echo clients=10   29130 req/s p95=0.66 ms err=0 cpu=31%
+  echo clients=25   28870 req/s p95=1.73 ms err=0 cpu=65%
+  echo clients=50   28996 req/s p95=3.47 ms err=0 cpu=93%
+  echo clients=100  27842 req/s p95=6.90 ms err=0 cpu=94%
+  echo clients=200  24926 req/s p95=15.12 ms err=0 cpu=97%
+  echo clients=400  18619 req/s p95=40.10 ms err=0 cpu=112%
+    done in 20.1s
+[e3] file transfer throughput (chunked send)
+  file 1 MB up=1244 MB/s down=806 MB/s
+  file 10 MB up=1772 MB/s down=1029 MB/s
+  file 50 MB up=1730 MB/s down=1046 MB/s
+  file 100 MB up=1730 MB/s down=1049 MB/s
+    done in 1.6s
+[e3b] concurrent downloads (chunked send)
+  file concurrent clients=1 aggregate=1024 MB/s cpu=19%
+  file concurrent clients=2 aggregate=1700 MB/s cpu=33%
+  file concurrent clients=4 aggregate=3117 MB/s cpu=83%
+  file concurrent clients=8 aggregate=3285 MB/s cpu=164%
+  file concurrent clients=16 aggregate=2726 MB/s cpu=215%
+    done in 0.7s
+[e3c] file transfer + concurrent downloads (sendfile send)
+  file sendfile 1 MB up=1280 MB/s down=698 MB/s
+  file sendfile 10 MB up=1734 MB/s down=984 MB/s
+  file sendfile 50 MB up=1723 MB/s down=1039 MB/s
+  file sendfile 100 MB up=1721 MB/s down=1040 MB/s
+  file concurrent clients=1 aggregate=1002 MB/s cpu=16%
+  file concurrent clients=2 aggregate=1640 MB/s cpu=28%
+  file concurrent clients=4 aggregate=2503 MB/s cpu=51%
+  file concurrent clients=8 aggregate=4777 MB/s cpu=113%
+  file concurrent clients=16 aggregate=4595 MB/s cpu=119%
+    done in 2.3s
+[e4] DNS latency and query rate
+  dns clients=1   4630 q/s p95=0.53 ms err=0
+  dns clients=2   9469 q/s p95=0.49 ms err=0
+  dns clients=4   13631 q/s p95=0.49 ms err=0
+  dns clients=8   13926 q/s p95=1.05 ms err=0
+  dns clients=16  14782 q/s p95=1.89 ms err=0
+  dns clients=32  14553 q/s p95=3.04 ms err=0
+  dns clients=64  12045 q/s p95=12.06 ms err=0
+    done in 17.3s
+[e5] packet loss, retransmission and reliability
+  loss=0.00: raw UDP loss obs=0.000 theory=0.000; r0=1.000, r1=1.000, r2=1.000, r4=1.000
+  loss=0.05: raw UDP loss obs=0.096 theory=0.098; r0=0.913, r1=0.993, r2=1.000, r4=1.000
+  loss=0.10: raw UDP loss obs=0.195 theory=0.190; r0=0.813, r1=0.967, r2=0.993, r4=1.000
+  loss=0.20: raw UDP loss obs=0.353 theory=0.360; r0=0.620, r1=0.847, r2=0.990, r4=0.990
+  loss=0.30: raw UDP loss obs=0.508 theory=0.510; r0=0.473, r1=0.740, r2=0.897, r4=0.960
+  loss=0.40: raw UDP loss obs=0.651 theory=0.640; r0=0.350, r1=0.610, r2=0.757, r4=0.890
+    done in 252.2s
+[e6] resource use with many idle connections
+  idle=0     rss=27.2 MB threads=8 echo p95=0.14 ms
+  idle=100   rss=32.6 MB threads=108 echo p95=0.25 ms
+  idle=250   rss=40.3 MB threads=258 echo p95=0.12 ms
+  idle=500   rss=53.4 MB threads=508 echo p95=0.13 ms
+  idle=1000  rss=79.5 MB threads=1008 echo p95=0.14 ms
+Traceback (most recent call last):
+  File "/Users/sarveshkute/Downloads/CN/bench/run_benchmarks.py", line 494, in <module>
+    main()
+    ~~~~^^
+  File "/Users/sarveshkute/Downloads/CN/bench/run_benchmarks.py", line 486, in main
+    run("e6", "resource use with many idle connections", e6_idle_connections, server=False)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sarveshkute/Downloads/CN/bench/run_benchmarks.py", line 472, in run
+    results[key] = fn(a.quick) if fn.__code__.co_argcount else fn()
+                   ~~^^^^^^^^^
+  File "/Users/sarveshkute/Downloads/CN/bench/run_benchmarks.py", line 353, in e6_idle_connections
+    lat = lat_stats([c.echo(b"p" * 64)[1] for _ in range(300)])
+                     ~~~~~~^^^^^^^^^^^
+  File "/Users/sarveshkute/Downloads/CN/client.py", line 44, in echo
+    reply = recv_frame(self.sock)
+  File "/Users/sarveshkute/Downloads/CN/protocol.py", line 43, in recv_frame
+    (n,) = HDR.unpack(recv_exact(sock, HDR.size))
+                      ~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/Users/sarveshkute/Downloads/CN/protocol.py", line 31, in recv_exact
+    k = sock.recv_into(view[got:], n - got)
+ConnectionResetError: [Errno 54] Connection reset by peer

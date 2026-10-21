@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Service Platform</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--line:#2a2f3d;--text:#d7dcec;--mute:#8a93ab;--accent:#5b9cf5;--ok:#4cc38a;--bad:#f2677a;--warn:#e9b44c;--term:#0b0d12}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{font-size:17px;margin:0;font-weight:650}
+.svc{display:flex;gap:14px;flex-wrap:wrap;margin-left:auto}
+.pill{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mute);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.dot.off{background:var(--bad)}
+main{display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:16px;padding:16px 20px;max-width:1500px;margin:0 auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;color:var(--mute);padding:10px 14px;cursor:pointer;font:inherit;border-bottom:2px solid transparent}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.pane{display:none;padding:16px}.pane.active{display:block}
+label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+input,select,button.go{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:8px 10px;width:100%}
+input[type=range]{padding:0}
+input[type=file]{padding:6px}
+.row{display:flex;gap:10px}.row>*{flex:1}
+button.go{background:var(--accent);border-color:var(--accent);color:#08101f;font-weight:600;cursor:pointer;margin-top:14px}
+button.go:hover{filter:brightness(1.1)}button.go.alt{background:transparent;color:var(--text);border-color:var(--line)}
+.hint{font-size:12px;color:var(--mute);margin-top:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer;color:var(--mute);background:var(--bg)}
+.chip:hover{color:var(--text);border-color:var(--accent)}
+.term{background:var(--term);border-radius:10px;border:1px solid var(--line);display:flex;flex-direction:column;height:380px}
+.termbar{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--line);color:var(--mute);font-size:12px}
+.termbar i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.termbar button{margin-left:auto;background:none;border:1px solid var(--line);color:var(--mute);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px}
+pre{margin:0;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+#term,#log{padding:12px;overflow:auto;flex:1}
+.cmd{color:var(--ok)}.err{color:var(--bad)}.dim{color:var(--mute)}
+.lw{color:var(--warn)}
+.right{display:flex;flex-direction:column;gap:16px;min-width:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:14px}
+.stat{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.stat b{display:block;font-size:19px;font-weight:650}.stat span{font-size:11px;color:var(--mute)}
+.logbox{height:260px}
+.figs{display:grid;gap:14px;padding:14px}
+.figs img{width:100%;background:#fff;border-radius:8px}
+.figs h4{margin:4px 0;font-size:13px;color:var(--mute);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
+a{color:var(--accent)}
+#views>div{display:none}#views>div.active{display:block}
+.vtabs{display:flex;gap:8px;padding:0 0 12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Lightweight Client-Server Network Service Platform</h1>
+  <div class="svc" id="svc"></div>
+</header>
+<main>
+  <section class="card">
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-p="echo">Echo</button>
+      <button class="tab" data-p="dns">DNS</button>
+      <button class="tab" data-p="file">Files</button>
+      <button class="tab" data-p="load">Load test</button>
+      <button class="tab" data-p="loss">Packet loss</button>
+    </div>
+
+    <div class="pane active" id="p-echo">
+      <label>Message</label><input id="echo-text" value="hello from the browser">
+      <div class="row">
+        <div><label>Protocol</label><select id="echo-proto"><option value="tcp">TCP echo (port 9001)</option><option value="udp">UDP echo (port 9003)</option></select></div>
+        <div><label>UDP retries</label><select id="echo-retries"><option>0</option><option>1</option><option selected>2</option><option>4</option></select></div>
+      </div>
+      <button class="go" onclick="echo()">Send</button>
+      <div class="hint">TCP uses length-prefixed frames on a fresh connection. UDP sends one datagram and retransmits on timeout (try it with the Packet loss tab).</div>
+    </div>
+
+    <div class="pane" id="p-dns">
+      <div class="row">
+        <div style="flex:2"><label>Name</label><input id="dns-name" value="www.campus.lab"></div>
+        <div><label>Type</label><select id="dns-type"><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option></select></div>
+      </div>
+      <div class="chips" id="dns-chips"></div>
+      <div class="row"><div><label>Retries</label><select id="dns-retries"><option>0</option><option>1</option><option selected>2</option><option>4</option></select></div>
+      <div><label>Timeout (s)</label><select id="dns-timeout"><option>0.05</option><option selected>0.3</option><option>1</option></select></div></div>
+      <button class="go" onclick="dns()">Resolve</button>
+      <div class="hint">Real RFC 1035 packets, authoritative for the <b>campus.lab</b> zone. Unknown names return NXDOMAIN.</div>
+    </div>
+
+    <div class="pane" id="p-file">
+      <label>Upload a file (max 50 MB)</label><input type="file" id="file-in">
+      <button class="go" onclick="upload()">Upload</button>
+      <button class="go alt" onclick="listFiles()">Refresh list</button>
+      <table id="files" style="margin-top:12px"></table>
+      <div class="hint">Uploads are SHA-256 checked by the server and stored atomically. Names are whitelisted: try uploading a file whose name contains spaces or leading dots to see an error.</div>
+    </div>
+
+    <div class="pane" id="p-load">
+      <div class="row">
+        <div><label>Concurrent clients: <b id="lc">50</b></label><input type="range" id="load-c" min="1" max="200" value="50" oninput="lc.textContent=this.value"></div>
+        <div><label>Requests / client: <b id="lr">50</b></label><input type="range" id="load-r" min="1" max="200" value="50" oninput="lr.textContent=this.value"></div>
+      </div>
+      <button class="go" onclick="load()">Run load test</button>
+      <div class="hint">Each client opens its own TCP connection and sends 1 KiB echo messages. Watch active connections, threads and CPU change in the statistics panel.</div>
+    </div>
+
+    <div class="pane" id="p-loss">
+      <label>Simulated loss per datagram: <b id="lossv">0</b>%</label>
+      <input type="range" id="loss-p" min="0" max="60" step="5" value="0" oninput="lossv.textContent=this.value">
+      <button class="go" onclick="setLoss()">Apply to UDP echo + DNS</button>
+      <div class="hint">The server drops each UDP datagram it receives or sends with this probability. Then use the Echo (UDP) or DNS tab with 0 retries and 2 retries and compare how often the request fails. Round-trip loss is 1-(1-p)².</div>
+      <button class="go alt" onclick="lossBatch()">Run 50 DNS queries with the current retry setting</button>
+    </div>
+  </section>
+
+  <div class="right">
+    <div id="views">
+      <div class="active" id="v-live">
+        <div class="vtabs"><button class="tab active" onclick="view('live')">Live</button><button class="tab" onclick="view('res')">Benchmark results</button></div>
+        <div class="term">
+          <div class="termbar"><i style="background:#ff5f56"></i><i style="background:#ffbd2e"></i><i style="background:#27c93f"></i>&nbsp;client terminal<button onclick="term.innerHTML=''">clear</button></div>
+          <pre id="term"><span class="dim">Use the controls on the left. Each action prints the equivalent command-line call and its output here.</span></pre>
+        </div>
+      </div>
+      <div id="v-res">
+        <div class="vtabs"><button class="tab" onclick="view('live')">Live</button><button class="tab active" onclick="view('res')">Benchmark results</button></div>
+        <div class="card figs">
+          <h4>Architecture</h4><img src="/figures/fig_architecture.png">
+          <h4>Response time vs payload size (TCP vs UDP)</h4><img src="/figures/fig_latency.png">
+          <h4>Concurrency: throughput, latency percentiles, CPU</h4><img src="/figures/fig_concurrency.png">
+          <h4>File transfer variants</h4><img src="/figures/fig_files.png">
+          <h4>DNS</h4><img src="/figures/fig_dns.png">
+          <h4>Packet loss and retransmission</h4><img src="/figures/fig_loss.png">
+          <h4>Resource utilisation</h4><img src="/figures/fig_resources.png">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <div class="term logbox">
+      <div class="termbar"><i style="background:#ff5f56"></i><i style="background:#ffbd2e"></i><i style="background:#27c93f"></i>&nbsp;server log (live)<button onclick="log.innerHTML=''">clear</button></div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+document.querySelectorAll('#tabs .tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.toggle('active',x===t));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='p-'+t.dataset.p));
+  if(t.dataset.p==='file')listFiles();
+});
+function view(v){$('v-live').classList.toggle('active',v==='live');$('v-res').classList.toggle('active',v==='res')}
+['www.campus.lab','web.campus.lab','campus.lab','alias1.campus.lab','mail.campus.lab','nosuchhost.campus.lab'].forEach(n=>{
+  const c=document.createElement('span');c.className='chip';c.textContent=n;c.onclick=()=>{$('dns-name').value=n;if(n==='campus.lab')$('dns-type').value='MX'};$('dns-chips').appendChild(c)});
+
+function show(r){
+  const t=$('term');
+  t.innerHTML+=`<span class="cmd">$ ${esc(r.cmd)}</span>\n<span class="${r.ok?'':'err'}">${esc(r.output)}</span>\n\n`;
+  t.scrollTop=t.scrollHeight;
+}
+async function post(url,body,raw){
+  const r=await fetch(url,{method:'POST',headers:raw?{}:{'Content-Type':'application/json'},body:raw||JSON.stringify(body)});
+  return r.json();
+}
+async function echo(){show(await post('/api/echo',{text:$('echo-text').value,proto:$('echo-proto').value,retries:$('echo-retries').value}))}
+async function dns(){show(await post('/api/dns',{name:$('dns-name').value,type:$('dns-type').value,retries:$('dns-retries').value,timeout:$('dns-timeout').value}))}
+async function load(){
+  show({cmd:`load test (${$('load-c').value} clients) ... running`,output:'',ok:true});
+  show(await post('/api/load',{clients:$('load-c').value,requests:$('load-r').value}))}
+async function setLoss(){show(await post('/api/loss',{p:$('loss-p').value/100}))}
+async function lossBatch(){
+  const retries=$('dns-retries').value;let ok=0,fail=0,tot=0;
+  for(let i=0;i<50;i++){const r=await post('/api/dns',{name:'web.campus.lab',type:'A',retries,timeout:0.05});r.ok?ok++:fail++;if(r.ms)tot+=r.ms}
+  show({cmd:`50 x dns web.campus.lab (retries=${retries}, timeout=0.05 s)`,output:`succeeded: ${ok}/50   failed: ${fail}/50   mean time of successes: ${ok?(tot/ok).toFixed(1):'-'} ms`,ok:fail===0})}
+async function listFiles(){
+  const r=await (await fetch('/api/file/list')).json();
+  $('files').innerHTML=r.items.map(i=>`<tr><td>${esc(i.name)}</td><td>${i.size.toLocaleString()} B</td><td><a href="/api/file/get?name=${encodeURIComponent(i.name)}" onclick="setTimeout(listFiles,300)">download</a></td></tr>`).join('')||'<tr><td class="dim">no files yet</td></tr>'}
+async function upload(){
+  const f=$('file-in').files[0];if(!f){alert('Choose a file first');return}
+  show(await post('/api/file/put?name='+encodeURIComponent(f.name),null,f));listFiles()}
+
+async function svcStatus(s){
+  $('svc').innerHTML=Object.entries(s.ports).map(([k,p])=>`<span class="pill"><span class="dot"></span>${k} :${p}</span>`).join('')}
+function renderStats(s){
+  const c=s.counters,g=k=>c[k]||0;
+  const cards=[['uptime',s.uptime.toFixed(0)+' s'],['active TCP',(s.active.echo||0)+(s.active.file||0)],['peak echo conns',s.peak.echo||0],
+    ['threads',s.threads],['server CPU time',s.cpu_s.toFixed(2)+' s'],['peak RSS',s.rss_mb.toFixed(0)+' MB'],
+    ['echo requests',g('echo.requests')],['files in / out',(g('file.bytes_in')/1e6).toFixed(1)+' / '+(g('file.bytes_out')/1e6).toFixed(1)+' MB'],
+    ['DNS queries',g('dns.datagrams_in')],['NXDOMAIN',g('dns.rcode.NXDOMAIN')],['UDP dropped (sim.)',g('dns.dropped_in')+g('dns.dropped_out')+g('udp-echo.dropped_in')+g('udp-echo.dropped_out')],
+    ['timeouts / aborts',g('echo.timeouts')+g('file.timeouts')+g('file.aborted')+g('echo.aborted')],['loss setting',(s.loss*100).toFixed(0)+' %']];
+  $('stats').innerHTML=cards.map(([l,v])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')}
+let since=0,first=true;
+async function tick(){
+  try{
+    const s=await (await fetch('/api/stats')).json();if(first){svcStatus(s);first=false}renderStats(s);
+    const l=await (await fetch('/api/logs?since='+since)).json();since=l.n;
+    if(l.lines.length){const e=$('log');const bottom=e.scrollTop+e.clientHeight>=e.scrollHeight-20;
+      e.innerHTML+=l.lines.map(x=>`<span class="${/WARNING/.test(x)?'lw':/ERROR/.test(x)?'err':'dim'}">${esc(x)}</span>`).join('\n')+'\n';
+      if(e.innerHTML.length>200000)e.innerHTML=e.innerHTML.slice(-100000);
+      if(bottom)e.scrollTop=e.scrollHeight}
+  }catch(e){}
+}
+setInterval(tick,700);tick();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[e5] packet loss, retransmission and reliability
+  loss=0.00: raw UDP loss obs=0.000 theory=0.000; r0=1.000, r1=1.000, r2=1.000, r4=1.000
+  loss=0.05: raw UDP loss obs=0.096 theory=0.098; r0=0.908, r1=0.991, r2=1.000, r4=1.000
+  loss=0.10: raw UDP loss obs=0.195 theory=0.190; r0=0.806, r1=0.964, r2=0.994, r4=1.000
+  loss=0.20: raw UDP loss obs=0.353 theory=0.360; r0=0.633, r1=0.867, r2=0.946, r4=0.998
+  loss=0.30: raw UDP loss obs=0.508 theory=0.510; r0=0.482, r1=0.733, r2=0.844, r4=0.964
+  loss=0.40: raw UDP loss obs=0.651 theory=0.640; r0=0.368, r1=0.583, r2=0.712, r4=0.895
+    done in 673.9s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json

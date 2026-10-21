@@ -1,0 +1,174 @@
+{
+  "total": 33,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "seconds": 9.65,
+  "tests": [
+    {
+      "id": "TestDNS.test_a_record",
+      "description": "An A query for a zone name returns NOERROR with both addresses.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_aaaa_mx_txt",
+      "description": "AAAA, MX and TXT records are encoded and decoded correctly.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_case_insensitive",
+      "description": "Name matching is case-insensitive (WWW.Campus.LAB).",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_cname_chain",
+      "description": "A two-level CNAME chain is followed and the final A records are included.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_compression_loop_rejected",
+      "description": "A name consisting of a self-referencing compression pointer is rejected, not looped on.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_concurrent_dns",
+      "description": "20 threads x 50 queries all receive correct answers.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_malformed_packet_formerr",
+      "description": "A truncated/garbage DNS packet gets FORMERR (or is ignored if no ID) and the server survives.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_matches_system_dig",
+      "description": "The server's answers are decodable by the independent `dig` tool (interoperability).",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_nodata",
+      "description": "A known name without the requested type yields NOERROR with an empty answer section.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_nxdomain",
+      "description": "An unknown name yields rcode NXDOMAIN with no answers.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestDNS.test_unsupported_opcode",
+      "description": "A non-QUERY opcode is answered with NOTIMP.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestEcho.test_abrupt_disconnect_mid_frame_is_logged_and_survived",
+      "description": "Client dies halfway through a frame: server records an abort and keeps serving others.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestEcho.test_concurrent_echo_clients",
+      "description": "50 concurrent clients each exchange 100 messages with no errors or cross-talk.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestEcho.test_echo_many_messages_one_connection",
+      "description": "500 sequential echoes on a single persistent connection all succeed.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestEcho.test_echo_roundtrip_sizes",
+      "description": "TCP echo returns identical bytes for 0 B, 1 B, 1 KiB and 1 MiB payloads.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestEcho.test_oversize_frame_rejected",
+      "description": "A frame header announcing more than 16 MiB makes the server drop the connection.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_aborted_upload_leaves_no_partial_file",
+      "description": "Client disconnects mid-upload: server removes the temporary file and stores nothing.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_checksum_mismatch_detected",
+      "description": "An upload whose bytes do not match the announced SHA-256 is rejected and not stored.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_concurrent_uploads",
+      "description": "8 clients upload 2 MB files simultaneously; every file is stored intact.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_digest_cache_invalidated_when_file_changes",
+      "description": "The SHA-256 cache serves repeat requests but is refreshed when the stored file is modified.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_empty_file",
+      "description": "A zero-byte file can be uploaded and downloaded.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_list_and_stat",
+      "description": "LIST shows uploaded files with sizes and STAT returns the correct size and digest.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_malformed_commands",
+      "description": "Unknown commands get ERR 400; an over-long command line closes the connection.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_missing_file_404",
+      "description": "Requesting a non-existent file returns ERR 404 and the session stays usable.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_oversize_upload_rejected",
+      "description": "An upload larger than the configured limit is refused before any data is sent (ERR 413).",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_path_traversal_blocked",
+      "description": "File names such as ../../etc/passwd or /etc/passwd are refused (ERR 400).",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_stats_command",
+      "description": "The STATS command returns live server counters and resource usage as JSON.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestFile.test_upload_download_integrity",
+      "description": "A 5 MB file uploaded then downloaded is byte-identical (SHA-256 verified end to end).",
+      "status": "PASS"
+    },
+    {
+      "id": "TestLimits.test_idle_timeout_and_max_clients",
+      "description": "Idle clients are dropped after the idle timeout; connections beyond max_clients get ERR 503.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestLimits.test_server_shutdown_detected_by_client",
+      "description": "If the server dies during a session, the next client call raises instead of hanging.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestLossyUDP.test_client_detects_dead_server",
+      "description": "With no server listening, the client reports ConnectionError after bounded retries and UDP times out.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestLossyUDP.test_retransmission_recovers_from_loss",
+      "description": "With 30% simulated loss per datagram, 3 attempts recover most queries (>80%) while some still fail.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestUDPEcho.test_udp_echo",
+      "description": "UDP echo returns the datagram on the first attempt when there is no loss.",
+      "status": "PASS"
+    }
+  ]
+}

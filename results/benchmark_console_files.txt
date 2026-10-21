@@ -1,0 +1,49 @@
+[e1] response time vs payload size (TCP vs UDP)
+    done in 0.7s
+[e3] baseline file transfer (chunked send, no digest cache)
+  file 1 MB up=1127 MB/s down=781 MB/s
+  file 10 MB up=1669 MB/s down=1045 MB/s
+  file 50 MB up=1655 MB/s down=1026 MB/s
+  file 100 MB up=1684 MB/s down=1036 MB/s
+    done in 1.6s
+[e3b] baseline concurrent downloads
+  file concurrent clients=1 aggregate=1000 MB/s cpu=16%
+  file concurrent clients=2 aggregate=1579 MB/s cpu=38%
+  file concurrent clients=4 aggregate=2839 MB/s cpu=87%
+  file concurrent clients=8 aggregate=3090 MB/s cpu=165%
+  file concurrent clients=16 aggregate=2597 MB/s cpu=209%
+    done in 0.8s
+[e3c] sendfile (no digest cache)
+  file sendfile 1 MB up=986 MB/s down=624 MB/s
+  file sendfile 10 MB up=1735 MB/s down=958 MB/s
+  file sendfile 50 MB up=1707 MB/s down=932 MB/s
+  file sendfile 100 MB up=1615 MB/s down=992 MB/s
+  file concurrent clients=1 aggregate=934 MB/s cpu=17%
+  file concurrent clients=2 aggregate=1597 MB/s cpu=31%
+  file concurrent clients=4 aggregate=2975 MB/s cpu=57%
+  file concurrent clients=8 aggregate=4120 MB/s cpu=105%
+  file concurrent clients=16 aggregate=4027 MB/s cpu=135%
+    done in 2.4s
+[e8] digest cache (chunked send)
+  file chunked 1 MB up=1127 MB/s down=1134 MB/s
+  file chunked 10 MB up=1623 MB/s down=1402 MB/s
+  file chunked 50 MB up=1627 MB/s down=1746 MB/s
+  file chunked 100 MB up=1679 MB/s down=1683 MB/s
+  file concurrent clients=1 aggregate=1707 MB/s cpu=8%
+  file concurrent clients=2 aggregate=2715 MB/s cpu=15%
+  file concurrent clients=4 aggregate=4182 MB/s cpu=58%
+  file concurrent clients=8 aggregate=3555 MB/s cpu=101%
+  file concurrent clients=16 aggregate=4150 MB/s cpu=109%
+    done in 2.1s
+[e8b] digest cache + sendfile
+  file sendfile 1 MB up=1209 MB/s down=999 MB/s
+  file sendfile 10 MB up=1715 MB/s down=1745 MB/s
+  file sendfile 50 MB up=1617 MB/s down=1727 MB/s
+  file sendfile 100 MB up=1667 MB/s down=1663 MB/s
+  file concurrent clients=1 aggregate=1686 MB/s cpu=6%
+  file concurrent clients=2 aggregate=2545 MB/s cpu=8%
+  file concurrent clients=4 aggregate=3849 MB/s cpu=22%
+  file concurrent clients=8 aggregate=7645 MB/s cpu=42%
+  file concurrent clients=16 aggregate=5707 MB/s cpu=43%
+    done in 2.0s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json
