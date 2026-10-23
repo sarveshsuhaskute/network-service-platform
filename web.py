@@ -180,6 +180,18 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        try:
+            self._get()
+        except (ValueError, KeyError, TypeError) as e:
+            self.send(400, result("request", f"error: bad request ({e})", ok=False))
+
+    def do_POST(self):
+        try:
+            self._post()
+        except (ValueError, KeyError, TypeError) as e:
+            self.send(400, result("request", f"error: bad request ({e})", ok=False))
+
+    def _get(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         if u.path in ("/", "/index.html"):
@@ -208,7 +220,7 @@ class H(BaseHTTPRequestHandler):
                              {"Content-Disposition": f'attachment; filename="{name}"', "X-Result": urllib.parse.quote(json.dumps(r))})
         self.send(404, {"error": "not found"})
 
-    def do_POST(self):
+    def _post(self):
         u = urllib.parse.urlparse(self.path)
         n = int(self.headers.get("Content-Length", 0))
         if n > MAX_UPLOAD:
