@@ -1,0 +1,7 @@
+[e10] pre-forked worker processes
+  workers=1: echo_50: 30,103/s p95=3.17ms err=0  echo_200: 24,349/s p95=15.90ms err=0  dns_32: 15,872/s p95=2.95ms err=0
+  workers=2: echo_50: 36,905/s p95=2.60ms err=0  echo_200: 34,446/s p95=11.20ms err=0  dns_32: 8,177/s p95=16.25ms err=0
+  workers=4: echo_50: 51,805/s p95=1.73ms err=0  echo_200: 45,939/s p95=9.57ms err=0  dns_32: 9,872/s p95=10.07ms err=0
+  workers=6: echo_50: 57,474/s p95=1.51ms err=0  echo_200: 51,784/s p95=7.15ms err=0  dns_32: 10,981/s p95=8.70ms err=0
+    done in 37.1s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json

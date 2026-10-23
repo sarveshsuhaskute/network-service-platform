@@ -32,7 +32,7 @@ dig @127.0.0.1 -p 9053 www.campus.lab           # the DNS service works with sta
 ```
 
 Useful server options: `--max-clients`, `--idle-timeout`, `--loss 0.2` (simulate 20 % datagram loss on the
-UDP services), `--send-mode sendfile`, `--digest-cache on|off`, `--upstream HOST:PORT`, `--log-level DEBUG`. See `python3 server.py -h`.
+UDP services), `--send-mode sendfile`, `--digest-cache on|off`, `--workers N` (pre-forked processes; helps TCP, not UDP), `--upstream HOST:PORT`, `--log-level DEBUG`. See `python3 server.py -h`.
 Logs go to `logs/server.log` (rotating) and stderr.
 
 ## Web dashboard

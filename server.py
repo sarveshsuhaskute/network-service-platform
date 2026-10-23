@@ -609,6 +609,8 @@ def main():
     p.add_argument("--digest-cache", choices=["on", "off"], default="on", help="cache SHA-256 of stored files")
     p.add_argument("--loss", type=float, default=0.0, help="simulated per-datagram loss probability (UDP services)")
     p.add_argument("--seed", type=int)
+    p.add_argument("--workers", type=int, default=1,
+                   help="pre-forked worker processes sharing the listening sockets (bypasses the one-core GIL limit; stats are per process)")
     p.add_argument("--log-file", default="logs/server.log")
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--stats-interval", type=float, default=30.0, help="seconds between stats log lines (0 = off)")
@@ -620,14 +622,34 @@ def main():
         h, _, pt = a.upstream.rpartition(":")
         up = (h, int(pt))
     plat = Platform(a.host, a.echo_port, a.file_port, a.udp_echo_port, a.dns_port, a.root, a.zone, a.max_clients,
-                    a.idle_timeout, a.loss, up, a.max_file_mb * 1024 * 1024, a.send_mode, seed=a.seed, digest_cache=a.digest_cache == "on").start()
-    print("READY " + json.dumps(plat.ports), flush=True)
+                    a.idle_timeout, a.loss, up, a.max_file_mb * 1024 * 1024, a.send_mode, seed=a.seed,
+                    digest_cache=a.digest_cache == "on")
+    # Pre-fork: sockets are already bound and listening, so every worker inherits them and the kernel hands each
+    # new connection / datagram to whichever worker is waiting. Fork happens before any thread is started.
+    children, is_worker = [], False
+    for _ in range(max(1, a.workers) - 1):
+        pid = os.fork()
+        if pid == 0:
+            is_worker, children = True, []
+            break
+        children.append(pid)
+    plat.start()
+    if not is_worker:
+        print("READY " + json.dumps(plat.ports), flush=True)
+        if children:
+            log.info("event=prefork workers=%d pids=%s", len(children) + 1, children)
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
     while not stop.wait(a.stats_interval or 3600):
         if a.stats_interval:
             log.info("event=stats %s", json.dumps(plat.stats.snapshot(), sort_keys=True))
+    for pid in children:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
     plat.stop()
 
 

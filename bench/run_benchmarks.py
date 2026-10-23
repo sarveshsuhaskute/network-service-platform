@@ -369,6 +369,26 @@ def e9_adaptive_rto(quick):
     return {"queries": N, "rows": rows}
 
 
+def e10_workers(quick):
+    """Pre-forked worker processes vs the single-process server (same ports, kernel distributes connections)."""
+    rows = []
+    for w in [1, 2, 4, 6]:
+        srv = Server(tag="bench-workers", workers=w)
+        try:
+            time.sleep(0.5)
+            row = {"workers": w}
+            for c in ([50] if quick else [50, 200]):
+                r = load("echo", srv.ports["echo"], c, 100 if quick else 300, 1024, procs=6)
+                row[f"echo_{c}"] = r
+            row["dns_32"] = load("dns", srv.ports["dns"], 32, 100 if quick else 400, procs=6)
+            rows.append(row)
+            print(f"  workers={w}: " + "  ".join(f"{k}: {v['req_per_s']:,.0f}/s p95={v['p95_ms']:.2f}ms err={v['errors']}"
+                                                 for k, v in row.items() if k != "workers"), flush=True)
+        finally:
+            srv.stop()
+    return rows
+
+
 def e6_idle_connections(quick):
     rows = []
     for n in ([0, 100, 400] if quick else [0, 100, 250, 500, 1000, 2000]):
@@ -527,6 +547,7 @@ def main():
     run("e4", "DNS latency and query rate", e4_dns)
     run("e5", "packet loss, retransmission and reliability", e5_loss, server=False)
     run("e9", "adaptive vs fixed retransmission timeout", e9_adaptive_rto, server=False)
+    run("e10", "pre-forked worker processes", e10_workers, server=False)
     run("e6", "resource use with many idle connections", e6_idle_connections, server=False)
     run("e6b", "burst connection limit", e6b_burst_limit, server=False)
     run("e7", "failure detection", e7_failure_detection, server=False)

@@ -201,6 +201,8 @@ DS, DSC = R["e8b"]["files"], R["e8b"]["concurrent"]
 E4L, E4Q = R["e4"]["latency"], R["e4"]["qps"]
 E5, E6, E6B, E7 = R["e5"], R["e6"], R["e6b"], R["e7"]
 E9 = R["e9"]
+E10 = R["e10"]
+W1, W6 = E10[0], E10[-1]
 RTO40 = [r for r in E9["rows"] if r["loss_per_datagram"] == 0.4][0]
 RTO_SPEEDUP = [r["fixed"]["mean_ms"] / r["adaptive"]["mean_ms"] for r in E9["rows"] if r["loss_per_datagram"] > 0]
 M = R["machine"]
@@ -608,8 +610,7 @@ P(f"**Weakness 1 – single-core ceiling.** Echo throughput plateaus at {f0(min(
   f"≈{f0(by(E2, 'clients', 50)['cpu_pct'])}% – one saturated core. CPython’s Global Interpreter Lock lets only one thread execute Python bytecode at a time, so adding "
   f"clients adds queueing delay, not capacity: p95 latency grows almost linearly (Little’s law: {c100['clients']} clients / {f0(c100['req_per_s'])} req/s = "
   f"{c100['clients'] / c100['req_per_s'] * 1000:.2f} ms predicted mean versus {f2(c100['mean_ms'])} ms measured). At 400 clients throughput falls to {f0(c400['req_per_s'])} req/s "
-  f"({(1 - c400['req_per_s'] / (sum(plateau) / len(plateau))) * 100:.0f}% below the plateau) because 400 runnable threads add scheduling overhead. The fix would be several worker processes sharing the listening port "
-  f"(`SO_REUSEPORT`) or an event-loop design; it was not implemented because it would change the thread-per-connection teaching model.")
+  f"({(1 - c400['req_per_s'] / (sum(plateau) / len(plateau))) * 100:.0f}% below the plateau) because 400 runnable threads add scheduling overhead. Optimisation 4 below removes this ceiling for TCP with pre-forked worker processes.")
 P(f"**Weakness 2 – memory per connection.** Thread-per-connection costs ≈{f1(idle2000['kb_per_conn'])} KB per client "
   f"({f1(idle2000['rss_mb'])} MB at 2,000 connections) and `kern.num_taskthreads` is 4,096 on this machine, so the design tops out near 4,000 simultaneous clients. Latency of an active client "
   f"is hardly affected by idle ones (p50 {f3(idle0['echo_p50_ms'])} → {f3(idle2000['echo_p50_ms'])} ms), so this is a capacity limit, not a speed limit.")
@@ -628,6 +629,23 @@ P(f"The success rate is identical in every row, which confirms that reliability 
   f"falls by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}×. On loopback the learned RTO sits at the 5 ms floor, so the floor (not the RTT) now dominates; on a real network with "
   f"tens of milliseconds of RTT the estimator would track the path instead. The trade-off is that a too-small floor causes spurious retransmissions on a path whose delay suddenly rises, "
   f"which is why RFC 6298 recommends a conservative minimum on the open Internet.")
+P(f"**Optimisation 4 – pre-forked worker processes.** To get past the one-core limit, `server.py --workers N` binds every socket once and then forks N−1 copies "
+  f"before any thread starts; all processes inherit the same listening sockets and the kernel hands each new connection or datagram to whichever process is waiting "
+  f"(the classic pre-fork model used by Apache and gunicorn). Each process has its own interpreter and GIL.")
+rows = []
+for r in E10:
+    rows.append([r["workers"], f0(r["echo_50"]["req_per_s"]), f2(r["echo_50"]["p95_ms"]), f0(r["echo_200"]["req_per_s"]), f2(r["echo_200"]["p95_ms"]),
+                 f0(r["dns_32"]["req_per_s"]), f2(r["dns_32"]["p95_ms"]), r["echo_50"]["errors"] + r["echo_200"]["errors"] + r["dns_32"]["errors"]])
+table(["Worker processes", "Echo, 50 clients (req/s)", "p95 (ms)", "Echo, 200 clients (req/s)", "p95 (ms)", "DNS, 32 resolvers (q/s)", "p95 (ms)", "Errors"], rows,
+      widths=[0.75, 0.9, 0.6, 0.9, 0.6, 0.9, 0.6, 0.55], cap="Single process versus pre-forked workers", size=9, label="workers")
+P(f"TCP echo throughput rises from {f0(W1['echo_50']['req_per_s'])} to {f0(W6['echo_50']['req_per_s'])} req/s with 50 clients "
+  f"({W6['echo_50']['req_per_s'] / W1['echo_50']['req_per_s']:.1f}×) and from {f0(W1['echo_200']['req_per_s'])} to {f0(W6['echo_200']['req_per_s'])} req/s with 200 clients "
+  f"({W6['echo_200']['req_per_s'] / W1['echo_200']['req_per_s']:.1f}×), and p95 latency at 200 clients falls from {f2(W1['echo_200']['p95_ms'])} to {f2(W6['echo_200']['p95_ms'])} ms, "
+  f"with 0 errors. Scaling is sub-linear partly because the six load-generator processes compete with the workers for the same 12 cores. "
+  f"**DNS gets worse** ({f0(W1['dns_32']['req_per_s'])} → {f0(W6['dns_32']['req_per_s'])} q/s): every worker blocks on the *same* UDP socket, so each datagram wakes several "
+  f"processes (the thundering-herd problem) and work bounces between them, while UDP has no connection to keep a client on one worker. The right design for UDP is one socket per worker "
+  f"with kernel load-balancing (`SO_REUSEPORT` on Linux), which macOS does not provide for this case. The lesson is that the same scaling technique helps a connection-oriented service "
+  f"and hurts a datagram service, so the platform keeps `--workers 1` as the default and documents `--workers N` for TCP-heavy loads. Server statistics are per process in this mode.")
 P("**Threats to validity.** All traffic is on loopback, so there is no propagation delay, queueing in routers, MTU fragmentation or real loss; absolute numbers will be lower on a real network and "
   "the *relative* conclusions (TCP versus UDP behaviour, effect of retries, effect of optimisations) are the findings to rely on. Client and server share CPU cores, and the Python load generators "
   "contribute their own latency. Results come from one machine and one session.")
@@ -665,6 +683,7 @@ table(["Contribution", "What is new / non-trivial", "Evidence in this report"],
        ["Atomic, verified file transfer", "SHA-256 announced before data, verified on both ends, temp file + atomic rename, cleanup on abort", "Tests on checksum mismatch, aborted upload, concurrent uploads"],
        ["Measured, root-caused optimisations", "Found a download/upload asymmetry through measurement, explained it (double file read), fixed it with a safe digest cache, and quantified `sendfile()`", f"+{(dl_dc100 / dl_base100 - 1) * 100:.0f}% download throughput; {c8[3]['cpu_pct'] / c8[0]['cpu_pct'] * 100:.0f}% CPU at 8 clients ({REF['file_conc']}, {REF['fig_files.png']})"],
        ["Adaptive retransmission timer", "RFC 6298 estimator (SRTT/RTTVAR, Karn’s rule, exponential back-off) applied to UDP request/response", f"Same success, {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× lower latency ({REF['rto']}, {REF['fig_rto.png']})"],
+       ["Pre-fork multi-process mode", "Shared listening sockets across processes break the one-core GIL ceiling for TCP; the UDP regression is measured and explained", f"Echo {W6['echo_50']['req_per_s'] / W1['echo_50']['req_per_s']:.1f}–{W6['echo_200']['req_per_s'] / W1['echo_200']['req_per_s']:.1f}× throughput ({REF['workers']})"],
        ["Honest scalability analysis", "Connection-burst limit, GIL ceiling, per-connection memory and thread cap all measured and explained", f"{REF['conc']}, {REF['idle']}; Section 9.e"],
        ["Observability", "`STATS` command returns live counters, CPU and memory; key=value logs are machine-parseable", f"{REF['term_concurrency.png']}, {REF['term_log.png']}"]],
       widths=[1.7, 2.7, 2.0], cap="Innovation and evidence summary", size=9)
@@ -683,7 +702,7 @@ H1("12. Limitations and Future Enhancement")
 H3("Limitations")
 bullets([
     "Measurements are on the loopback interface only; real networks add latency, jitter, queueing, MTU effects and genuine loss.",
-    "The thread-per-connection design is bounded by the interpreter’s single-core execution (≈29k echo requests/s) and by thread and memory limits (≈54 KB per connection; ≈4,000 threads per process on this macOS machine).",
+    "A single server process is bounded by the interpreter’s single-core execution (≈29k echo requests/s); `--workers N` lifts this for TCP but slows the shared-socket UDP services. Thread and memory limits also apply (≈54 KB per connection; ≈4,000 threads per process on this macOS machine).",
     "A burst of more than roughly 200 simultaneous new connections can overflow the kernel accept queue (default `somaxconn` 128).",
     "No encryption or authentication: any client that can reach the ports can read, write and list files.",
     "The DNS service is authoritative only: no recursion (apart from simple forwarding), no EDNS0, no DNS over TCP for truncated answers, no DNSSEC, no wildcard records.",
