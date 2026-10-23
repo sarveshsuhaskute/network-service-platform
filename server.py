@@ -289,9 +289,13 @@ class FileService(TCPService):
                 conn.sendall(body)
                 sess.bytes_out += len(body)
             elif cmd == "LIST":
-                items = [{"name": n, "size": os.path.getsize(os.path.join(self.root, n))}
-                         for n in sorted(os.listdir(self.root))
-                         if not n.startswith(".") and os.path.isfile(os.path.join(self.root, n))]
+                items = []
+                for n in sorted(os.listdir(self.root)):
+                    try:                                 # a file may be replaced/removed between listdir and stat
+                        if not n.startswith(".") and os.path.isfile(os.path.join(self.root, n)):
+                            items.append({"name": n, "size": os.path.getsize(os.path.join(self.root, n))})
+                    except OSError:
+                        continue
                 body = json.dumps(items).encode()
                 send(f"OK {len(body)}\n")
                 conn.sendall(body)
