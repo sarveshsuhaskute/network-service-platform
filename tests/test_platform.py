@@ -345,6 +345,29 @@ class TestLossyUDP(unittest.TestCase):
             plat.stop()
             tmp.cleanup()
 
+    def test_adaptive_timeout_learns_rtt_and_recovers(self):
+        """The RFC 6298-style estimator learns a sub-millisecond RTO and still recovers queries under 30% loss."""
+        est = cl.RTTEstimator(initial=0.05)
+        tmp = tempfile.TemporaryDirectory()
+        plat = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=tmp.name, zone=ZONE,
+                           loss=0.3, seed=5).start()
+        try:
+            ok = sum(self._try(plat, est) for _ in range(150))
+            self.assertGreater(ok / 150, 0.85)                 # 4 retries: theory 1-0.51^5 = 0.965
+            self.assertLess(est.rto(), 0.05)                    # learned a timeout well below the initial 50 ms
+            self.assertGreaterEqual(est.rto(), est.min_rto)
+        finally:
+            plat.stop()
+            tmp.cleanup()
+
+    @staticmethod
+    def _try(plat, est):
+        try:
+            cl.dns_query("127.0.0.1", plat.ports["dns"], "web.campus.lab", retries=4, estimator=est)
+            return 1
+        except socket.timeout:
+            return 0
+
     def test_client_detects_dead_server(self):
         """With no server listening, the client reports ConnectionError after bounded retries and UDP times out."""
         s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()

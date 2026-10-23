@@ -1,0 +1,8 @@
+[e9] adaptive vs fixed retransmission timeout
+  loss=0.0 fixed: succ=1.000 mean=0.09 ms | adaptive: succ=1.000 mean=0.08 ms rto~5.00 ms
+  loss=0.1 fixed: succ=1.000 mean=13.02 ms | adaptive: succ=1.000 mean=1.95 ms rto~5.00 ms
+  loss=0.2 fixed: succ=0.990 mean=26.66 ms | adaptive: succ=0.990 mean=5.21 ms rto~5.00 ms
+  loss=0.3 fixed: succ=0.958 mean=41.68 ms | adaptive: succ=0.958 mean=9.13 ms rto~5.00 ms
+  loss=0.4 fixed: succ=0.882 mean=57.58 ms | adaptive: succ=0.882 mean=13.51 ms rto~5.00 ms
+    done in 115.3s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json

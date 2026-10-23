@@ -1,9 +1,9 @@
 {
-  "total": 33,
+  "total": 34,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
-  "seconds": 9.65,
+  "seconds": 11.75,
   "tests": [
     {
       "id": "TestDNS.test_a_record",
@@ -153,6 +153,11 @@
     {
       "id": "TestLimits.test_server_shutdown_detected_by_client",
       "description": "If the server dies during a session, the next client call raises instead of hanging.",
+      "status": "PASS"
+    },
+    {
+      "id": "TestLossyUDP.test_adaptive_timeout_learns_rtt_and_recovers",
+      "description": "The RFC 6298-style estimator learns a sub-millisecond RTO and still recovers queries under 30% loss.",
       "status": "PASS"
     },
     {

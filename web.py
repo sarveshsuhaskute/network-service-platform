@@ -45,6 +45,7 @@ class RingLog(logging.Handler):
 
 RING = RingLog()
 PLAT = None
+ESTIMATOR = cl.RTTEstimator(initial=0.05)       # shared adaptive-RTO state for the dashboard's DNS client
 
 
 def result(cmd, output, ok=True, ms=None):
@@ -67,10 +68,13 @@ def api_echo(b):
 
 def api_dns(b):
     name, qtype = b.get("name", "web.campus.lab").strip(), b.get("type", "A")
-    cmd = f"python3 client.py dns {name} {qtype}"
+    adaptive = bool(b.get("adaptive"))
+    cmd = f"python3 client.py dns {name} {qtype}" + (" --adaptive" if adaptive else "")
     try:
-        r, secs, n = cl.dns_query("127.0.0.1", PLAT.ports["dns"], name, qtype, float(b.get("timeout", 0.3)), int(b.get("retries", 2)))
-        out = [f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} tc={int(r.tc)} time={secs * 1000:.3f} ms attempts={n}"]
+        r, secs, n = cl.dns_query("127.0.0.1", PLAT.ports["dns"], name, qtype, float(b.get("timeout", 0.3)), int(b.get("retries", 2)),
+                                  ESTIMATOR if adaptive else None)
+        rto = f" rto={ESTIMATOR.rto() * 1000:.1f} ms" if adaptive else ""
+        out = [f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} tc={int(r.tc)} time={secs * 1000:.3f} ms attempts={n}{rto}"]
         out += [f"{a.name}\t{a.ttl}\tIN\t{dw.QTYPE_NAMES.get(a.rtype, a.rtype)}\t{a.value}" for a in r.answers]
         return result(cmd, "\n".join(out), ms=secs * 1000)
     except Exception as e:

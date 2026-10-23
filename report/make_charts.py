@@ -137,6 +137,22 @@ def fig_loss():
     save("fig_loss.png")
 
 
+# 5b. adaptive RTO
+def fig_rto():
+    rows = R["e9"]["rows"]
+    p = [r["loss_per_datagram"] * 100 for r in rows]
+    fig, ax = plt.subplots(1, 2, figsize=(10, 3.6))
+    for mode, col, lab in (("fixed", RED, "fixed 50 ms timeout"), ("adaptive", GREEN, "adaptive RTO (RFC 6298 style)")):
+        ax[0].plot(p, [r[mode]["mean_ms"] for r in rows], "o-", color=col, label=lab + " mean")
+        ax[0].plot(p, [r[mode]["p95_ms"] for r in rows], "o--", color=col, alpha=.5, label=lab + " p95")
+        ax[1].plot(p, [r[mode]["success"] * 100 for r in rows], "o-", color=col, label=lab)
+    ax[0].set_xlabel("simulated loss per datagram (%)"); ax[0].set_ylabel("response time of successes (ms)")
+    ax[0].set_title("Latency cost of loss: fixed vs adaptive timeout"); ax[0].legend(fontsize=7)
+    ax[1].set_xlabel("simulated loss per datagram (%)"); ax[1].set_ylabel("successful queries (%)")
+    ax[1].set_title("Success rate (4 retries in both cases)"); ax[1].legend(fontsize=8); ax[1].set_ylim(80, 101)
+    save("fig_rto.png")
+
+
 # 6. resources
 def fig_resources():
     e6 = R["e6"]
@@ -236,5 +252,5 @@ def screenshots():
 
 
 if __name__ == "__main__":
-    fig_latency(); fig_concurrency(); fig_files(); fig_dns(); fig_loss(); fig_resources(); fig_architecture(); screenshots()
+    fig_latency(); fig_concurrency(); fig_files(); fig_dns(); fig_loss(); fig_rto(); fig_resources(); fig_architecture(); screenshots()
     print("figures written to", FIG)

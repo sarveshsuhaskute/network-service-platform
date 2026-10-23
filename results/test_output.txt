@@ -58,6 +58,8 @@ test_idle_timeout_and_max_clients (test_platform.TestLimits.test_idle_timeout_an
 Idle clients are dropped after the idle timeout; connections beyond max_clients get ERR 503. ... ok
 test_server_shutdown_detected_by_client (test_platform.TestLimits.test_server_shutdown_detected_by_client)
 If the server dies during a session, the next client call raises instead of hanging. ... ok
+test_adaptive_timeout_learns_rtt_and_recovers (test_platform.TestLossyUDP.test_adaptive_timeout_learns_rtt_and_recovers)
+The RFC 6298-style estimator learns a sub-millisecond RTO and still recovers queries under 30% loss. ... ok
 test_client_detects_dead_server (test_platform.TestLossyUDP.test_client_detects_dead_server)
 With no server listening, the client reports ConnectionError after bounded retries and UDP times out. ... ok
 test_retransmission_recovers_from_loss (test_platform.TestLossyUDP.test_retransmission_recovers_from_loss)
@@ -66,6 +68,6 @@ test_udp_echo (test_platform.TestUDPEcho.test_udp_echo)
 UDP echo returns the datagram on the first attempt when there is no loss. ... ok
 
 ----------------------------------------------------------------------
-Ran 33 tests in 9.645s
+Ran 34 tests in 11.743s
 
 OK

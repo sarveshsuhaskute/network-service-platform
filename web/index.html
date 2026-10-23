@@ -87,6 +87,7 @@ a{color:var(--accent)}
       <div class="chips" id="dns-chips"></div>
       <div class="row"><div><label>Retries</label><select id="dns-retries"><option>0</option><option>1</option><option selected>2</option><option>4</option></select></div>
       <div><label>Timeout (s)</label><select id="dns-timeout"><option>0.05</option><option selected>0.3</option><option>1</option></select></div></div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text)"><input type="checkbox" id="dns-adaptive" style="width:auto"> Adaptive timeout (RFC 6298 RTO, overrides the fixed timeout)</label>
       <button class="go" onclick="dns()">Resolve</button>
       <div class="hint">Real RFC 1035 packets, authoritative for the <b>campus.lab</b> zone. Unknown names return NXDOMAIN.</div>
     </div>
@@ -112,7 +113,7 @@ a{color:var(--accent)}
       <label>Simulated loss per datagram: <b id="lossv">0</b>%</label>
       <input type="range" id="loss-p" min="0" max="60" step="5" value="0" oninput="lossv.textContent=this.value">
       <button class="go" onclick="setLoss()">Apply to UDP echo + DNS</button>
-      <div class="hint">The server drops each UDP datagram it receives or sends with this probability. Then use the Echo (UDP) or DNS tab with 0 retries and 2 retries and compare how often the request fails. Round-trip loss is 1-(1-p)².</div>
+      <div class="hint">The server drops each UDP datagram it receives or sends with this probability. Then use the Echo (UDP) or DNS tab with 0 retries and 2 retries and compare how often the request fails. Round-trip loss is 1-(1-p)². Tick "Adaptive timeout" in the DNS tab and run the batch again: same success rate, much lower response time.</div>
       <button class="go alt" onclick="lossBatch()">Run 50 DNS queries with the current retry setting</button>
     </div>
   </section>
@@ -135,6 +136,7 @@ a{color:var(--accent)}
           <h4>File transfer variants</h4><img src="/figures/fig_files.png">
           <h4>DNS</h4><img src="/figures/fig_dns.png">
           <h4>Packet loss and retransmission</h4><img src="/figures/fig_loss.png">
+          <h4>Fixed vs adaptive retransmission timeout</h4><img src="/figures/fig_rto.png">
           <h4>Resource utilisation</h4><img src="/figures/fig_resources.png">
         </div>
       </div>
@@ -173,15 +175,15 @@ async function post(url,body,raw){
   return r.json();
 }
 async function echo(){show(await post('/api/echo',{text:$('echo-text').value,proto:$('echo-proto').value,retries:$('echo-retries').value}))}
-async function dns(){show(await post('/api/dns',{name:$('dns-name').value,type:$('dns-type').value,retries:$('dns-retries').value,timeout:$('dns-timeout').value}))}
+async function dns(){show(await post('/api/dns',{name:$('dns-name').value,type:$('dns-type').value,retries:$('dns-retries').value,timeout:$('dns-timeout').value,adaptive:$('dns-adaptive').checked}))}
 async function load(){
   show({cmd:`load test (${$('load-c').value} clients) ... running`,output:'',ok:true});
   show(await post('/api/load',{clients:$('load-c').value,requests:$('load-r').value}))}
 async function setLoss(){show(await post('/api/loss',{p:$('loss-p').value/100}))}
 async function lossBatch(){
-  const retries=$('dns-retries').value;let ok=0,fail=0,tot=0;
-  for(let i=0;i<50;i++){const r=await post('/api/dns',{name:'web.campus.lab',type:'A',retries,timeout:0.05});r.ok?ok++:fail++;if(r.ms)tot+=r.ms}
-  show({cmd:`50 x dns web.campus.lab (retries=${retries}, timeout=0.05 s)`,output:`succeeded: ${ok}/50   failed: ${fail}/50   mean time of successes: ${ok?(tot/ok).toFixed(1):'-'} ms`,ok:fail===0})}
+  const retries=$('dns-retries').value,adaptive=$('dns-adaptive').checked;let ok=0,fail=0,tot=0;
+  for(let i=0;i<50;i++){const r=await post('/api/dns',{name:'web.campus.lab',type:'A',retries,timeout:0.05,adaptive});r.ok?ok++:fail++;if(r.ms)tot+=r.ms}
+  show({cmd:`50 x dns web.campus.lab (retries=${retries}, ${adaptive?'adaptive RTO':'fixed 0.05 s timeout'})`,output:`succeeded: ${ok}/50   failed: ${fail}/50   mean time of successes: ${ok?(tot/ok).toFixed(1):'-'} ms`,ok:fail===0})}
 async function listFiles(){
   const r=await (await fetch('/api/file/list')).json();
   $('files').innerHTML=r.items.map(i=>`<tr><td>${esc(i.name)}</td><td>${i.size.toLocaleString()} B</td><td><a href="/api/file/get?name=${encodeURIComponent(i.name)}" onclick="setTimeout(listFiles,300)">download</a></td></tr>`).join('')||'<tr><td class="dim">no files yet</td></tr>'}

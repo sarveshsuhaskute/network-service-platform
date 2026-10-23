@@ -149,18 +149,46 @@ class FileClient:
         self.close()
 
 
-def udp_request(host, port, payload, match, timeout=0.5, retries=2):
+class RTTEstimator:
+    """Adaptive retransmission timeout in the style of RFC 6298 (Jacobson/Karels).
+
+    SRTT and RTTVAR are smoothed from RTT samples; RTO = SRTT + 4*RTTVAR, clamped to
+    [min_rto, max_rto]. Only replies to first transmissions are sampled (Karn's rule), and
+    each retransmission doubles the timeout (exponential back-off).
+    """
+
+    def __init__(self, initial=0.5, min_rto=0.005, max_rto=2.0, alpha=0.125, beta=0.25):
+        self.srtt = self.rttvar = None
+        self.initial, self.min_rto, self.max_rto, self.alpha, self.beta = initial, min_rto, max_rto, alpha, beta
+
+    def sample(self, rtt):
+        if self.srtt is None:
+            self.srtt, self.rttvar = rtt, rtt / 2
+        else:
+            self.rttvar = (1 - self.beta) * self.rttvar + self.beta * abs(self.srtt - rtt)
+            self.srtt = (1 - self.alpha) * self.srtt + self.alpha * rtt
+
+    def rto(self):
+        if self.srtt is None:
+            return self.initial
+        return min(self.max_rto, max(self.min_rto, self.srtt + 4 * self.rttvar))
+
+
+def udp_request(host, port, payload, match, timeout=0.5, retries=2, estimator=None):
     """Send a datagram and wait for a reply accepted by match(reply).
 
-    Retransmits up to `retries` times. Returns (reply, total_seconds, attempts);
-    raises socket.timeout when every attempt is lost.
+    Retransmits up to `retries` times. With an RTTEstimator the per-attempt timeout is
+    adaptive (RTO, doubled on every retransmission); otherwise it is the fixed `timeout`.
+    Returns (reply, total_seconds, attempts); raises socket.timeout when every attempt is lost.
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         t0 = time.perf_counter()
+        wait = estimator.rto() if estimator else timeout
         for attempt in range(1, retries + 2):
+            sent = time.perf_counter()
             s.sendto(payload, (host, port))
-            deadline = time.perf_counter() + timeout
+            deadline = sent + wait
             while True:
                 left = deadline - time.perf_counter()
                 if left <= 0:
@@ -171,20 +199,24 @@ def udp_request(host, port, payload, match, timeout=0.5, retries=2):
                 except socket.timeout:
                     break
                 if match(data):
+                    if estimator and attempt == 1:          # Karn: never sample retransmitted requests
+                        estimator.sample(time.perf_counter() - sent)
                     return data, time.perf_counter() - t0, attempt
+            if estimator:
+                wait = min(wait * 2, estimator.max_rto)     # exponential back-off
         raise socket.timeout(f"no reply after {retries + 1} attempts")
     finally:
         s.close()
 
 
-def udp_echo(host, port, payload, timeout=0.5, retries=2):
-    return udp_request(host, port, payload, lambda d: d == payload, timeout, retries)
+def udp_echo(host, port, payload, timeout=0.5, retries=2, estimator=None):
+    return udp_request(host, port, payload, lambda d: d == payload, timeout, retries, estimator)
 
 
 _txid = 0
 
 
-def dns_query(host, port, name, qtype="A", timeout=0.5, retries=2):
+def dns_query(host, port, name, qtype="A", timeout=0.5, retries=2, estimator=None):
     """Resolve name. Returns (Response, total_seconds, attempts)."""
     global _txid
     _txid = (_txid + 1) & 0xFFFF
@@ -194,7 +226,7 @@ def dns_query(host, port, name, qtype="A", timeout=0.5, retries=2):
     def match(d):
         return len(d) >= 12 and struct.unpack("!H", d[:2])[0] == qid
 
-    data, secs, attempts = udp_request(host, port, pkt, match, timeout, retries)
+    data, secs, attempts = udp_request(host, port, pkt, match, timeout, retries, estimator)
     return dw.parse_response(data), secs, attempts
 
 
@@ -222,6 +254,7 @@ def main():
     d.add_argument("--port", type=int, default=9053)
     d.add_argument("--timeout", type=float, default=0.5)
     d.add_argument("--retries", type=int, default=2)
+    d.add_argument("--adaptive", action="store_true", help="adaptive (RFC 6298-style) retransmission timeout")
     f = sub.add_parser("file", help="file transfer")
     f.add_argument("--port", type=int, default=9002)
     fs = f.add_subparsers(dest="op", required=True)
@@ -241,7 +274,8 @@ def main():
             r, secs, n = udp_echo(a.host, a.port, a.text.encode(), a.timeout, a.retries)
             print(f"{r.decode()!r}  ({secs * 1000:.3f} ms, {n} attempt(s))")
         elif a.cmd == "dns":
-            r, secs, n = dns_query(a.host, a.port, a.name, a.type, a.timeout, a.retries)
+            r, secs, n = dns_query(a.host, a.port, a.name, a.type, a.timeout, a.retries,
+                                   RTTEstimator(initial=a.timeout) if a.adaptive else None)
             print(f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} tc={int(r.tc)} time={secs * 1000:.3f} ms attempts={n}")
             for ans in r.answers:
                 print(f"{ans.name}\t{ans.ttl}\tIN\t{dw.QTYPE_NAMES.get(ans.rtype, ans.rtype)}\t{ans.value}")

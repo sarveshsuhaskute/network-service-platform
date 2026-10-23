@@ -1,5 +1,7 @@
 # Lightweight Client-Server Network Service Platform
 
+[![tests](https://github.com/sarveshsuhaskute/network-service-platform/actions/workflows/tests.yml/badge.svg)](https://github.com/sarveshsuhaskute/network-service-platform/actions/workflows/tests.yml)
+
 BCSE308P – Computer Networks, Problem III. A TCP/UDP socket-programming platform that offers four
 services from one server process, handles many concurrent clients, keeps communication logs, detects
 and survives communication failures, and is evaluated on response time, throughput, reliability,
@@ -21,6 +23,7 @@ python3 server.py                      # all four services on 127.0.0.1 (use --h
 python3 client.py echo "hello"
 python3 client.py udp-echo "hello"
 python3 client.py dns www.campus.lab            # also: dns campus.lab MX | TXT | AAAA
+python3 client.py dns www.campus.lab --adaptive # adaptive (RFC 6298-style) retransmission timeout
 python3 client.py file put notes.txt
 python3 client.py file list
 python3 client.py file get notes.txt copy.txt
@@ -45,7 +48,7 @@ panel, a live server log, live statistics and the benchmark charts. Stop any sep
 ## Test, benchmark, demo
 
 ```bash
-python3 tests/run_tests.py             # 33 functional / fault-injection / security tests
+python3 tests/run_tests.py             # 34 functional / fault-injection / security tests
 python3 bench/run_benchmarks.py        # full evaluation (~15 min) -> results/benchmarks.json  (--quick for a smoke run)
 ./demo.sh                              # scripted end-to-end demonstration
 ```

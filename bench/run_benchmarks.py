@@ -335,6 +335,40 @@ def e5_loss(quick):
     return rows
 
 
+def e9_adaptive_rto(quick):
+    """Fixed 50 ms retransmission timeout vs RFC 6298-style adaptive RTO (both: 4 retries, same seeded loss)."""
+    rows = []
+    N = 150 if quick else 500
+    for p in [0.0, 0.1, 0.2, 0.3, 0.4]:
+        row = {"loss_per_datagram": p}
+        for mode in ("fixed", "adaptive"):
+            srv = Server(tag="bench-rto", loss=p, seed=23)
+            try:
+                est = cl.RTTEstimator(initial=0.05) if mode == "adaptive" else None
+                ok, times, attempts, rtos = 0, [], [], []
+                t0 = time.perf_counter()
+                for _ in range(N):
+                    try:
+                        _, secs, a = cl.dns_query("127.0.0.1", srv.ports["dns"], "web.campus.lab", timeout=0.05,
+                                                  retries=4, estimator=est)
+                        ok += 1; times.append(secs * 1000); attempts.append(a)
+                    except socket.timeout:
+                        attempts.append(5)
+                    if est:
+                        rtos.append(est.rto() * 1000)
+                row[mode] = {"success": ok / N, "mean_ms": statistics.fmean(times) if times else None,
+                             "p95_ms": pct(times, 95) if times else None, "mean_attempts": statistics.fmean(attempts),
+                             "total_s": time.perf_counter() - t0, "final_rto_ms": rtos[-1] if rtos else 50.0,
+                             "median_rto_ms": pct(rtos, 50) if rtos else 50.0}
+            finally:
+                srv.stop()
+        rows.append(row)
+        print(f"  loss={p:.1f} fixed: succ={row['fixed']['success']:.3f} mean={row['fixed']['mean_ms'] or 0:.2f} ms | "
+              f"adaptive: succ={row['adaptive']['success']:.3f} mean={row['adaptive']['mean_ms'] or 0:.2f} ms "
+              f"rto~{row['adaptive']['median_rto_ms']:.2f} ms", flush=True)
+    return {"queries": N, "rows": rows}
+
+
 def e6_idle_connections(quick):
     rows = []
     for n in ([0, 100, 400] if quick else [0, 100, 250, 500, 1000, 2000]):
@@ -492,6 +526,7 @@ def main():
     run("e8b", "digest cache + sendfile", sendfile_runs_named("sendfile"), digest_cache="on", send_mode="sendfile")
     run("e4", "DNS latency and query rate", e4_dns)
     run("e5", "packet loss, retransmission and reliability", e5_loss, server=False)
+    run("e9", "adaptive vs fixed retransmission timeout", e9_adaptive_rto, server=False)
     run("e6", "resource use with many idle connections", e6_idle_connections, server=False)
     run("e6b", "burst connection limit", e6b_burst_limit, server=False)
     run("e7", "failure detection", e7_failure_detection, server=False)

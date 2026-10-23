@@ -200,6 +200,9 @@ DC, DCC = R["e8"]["files"], R["e8"]["concurrent"]
 DS, DSC = R["e8b"]["files"], R["e8b"]["concurrent"]
 E4L, E4Q = R["e4"]["latency"], R["e4"]["qps"]
 E5, E6, E6B, E7 = R["e5"], R["e6"], R["e6b"], R["e7"]
+E9 = R["e9"]
+RTO40 = [r for r in E9["rows"] if r["loss_per_datagram"] == 0.4][0]
+RTO_SPEEDUP = [r["fixed"]["mean_ms"] / r["adaptive"]["mean_ms"] for r in E9["rows"] if r["loss_per_datagram"] > 0]
 M = R["machine"]
 
 
@@ -371,7 +374,8 @@ P(f"Evaluation on an {M['cpu']} machine ({M['cores']} cores, {M['ram_gb']:.0f} G
   f"{MAXDEV_RAW:.1f} percentage points, and a retransmission policy that raises DNS success from {pc(dns_at(loss20, 0)['success'])} to "
   f"{pc(dns_at(loss20, 2)['success'])} at 20% per-datagram loss; and {f1(idle2000['kb_per_conn'])} KB of memory per open connection. "
   f"A digest cache raised single-client download throughput from {f1(dl_base100 / 1000)} to {f1(dl_dc100 / 1000)} GB/s, and combined with "
-  f"`sendfile()` it cut server CPU at 8 concurrent downloads from {f0(c8[0]['cpu_pct'])}% to {f0(c8[3]['cpu_pct'])}%. The suite of "
+  f"`sendfile()` it cut server CPU at 8 concurrent downloads from {f0(c8[0]['cpu_pct'])}% to {f0(c8[3]['cpu_pct'])}%. An adaptive, RFC 6298-style retransmission timer cut "
+  f"the response time of lossy DNS queries by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× at the same success rate. The suite of "
   f"{T['total']} automated tests ({tests_pass} passing) covers functional, fault-injection and security cases.")
 
 # =============================================================================== 6 Workflow / architecture
@@ -438,7 +442,7 @@ table(["Module (file)", "Responsibility", "Key design points"],
        ["`server.py` – `FileService`", "File transfer", "LIST/GET/PUT/STAT/STATS/PING/QUIT; name whitelist; size limit; temp-file + atomic rename; SHA-256 digest cache; chunked or `sendfile` sending"],
        ["`server.py` – `UDPService`, `UDPEchoService`", "UDP receive loop and worker pool", "Per-datagram simulated loss (`--loss`) applied on receive and on send"],
        ["`server.py` – `Zone`, `DNSService`", "Authoritative DNS", "JSON zone, case-insensitive lookup, CNAME chasing, NXDOMAIN/NODATA, FORMERR/NOTIMP/REFUSED, optional forwarding with TTL cache"],
-       ["`client.py`", "Client library and CLI", "`tcp_connect` (retry + back-off), `EchoClient`, `FileClient` (verified GET/PUT), `udp_request` (retransmit, ID matching), `dns_query`"],
+       ["`client.py`", "Client library and CLI", "`tcp_connect` (retry + back-off), `EchoClient`, `FileClient` (verified GET/PUT), `udp_request` (retransmit, ID matching), `RTTEstimator` (adaptive RTO), `dns_query`"],
        ["`tests/`", f"{T['total']} automated tests", "Functional, concurrency, fault injection, security; `run_tests.py` records results as JSON"],
        ["`bench/run_benchmarks.py`", "Evaluation harness", "Launches the server as a separate process, multi-process load generators, RSS sampling, CPU from `getrusage` deltas"]],
       widths=[1.55, 1.5, 3.35], cap="Module overview", size=9)
@@ -609,8 +613,21 @@ P(f"**Weakness 1 – single-core ceiling.** Echo throughput plateaus at {f0(min(
 P(f"**Weakness 2 – memory per connection.** Thread-per-connection costs ≈{f1(idle2000['kb_per_conn'])} KB per client "
   f"({f1(idle2000['rss_mb'])} MB at 2,000 connections) and `kern.num_taskthreads` is 4,096 on this machine, so the design tops out near 4,000 simultaneous clients. Latency of an active client "
   f"is hardly affected by idle ones (p50 {f3(idle0['echo_p50_ms'])} → {f3(idle2000['echo_p50_ms'])} ms), so this is a capacity limit, not a speed limit.")
-P("**Weakness 3 – UDP timeouts are fixed.** The client uses a constant per-attempt timeout. The measurements show the cost: at 40% loss with 4 retries the mean response is "
-  f"{f1(dns_at(loss40, 4)['mean_ms_success'])} ms. An adaptive timeout (RTT estimator with exponential back-off, as in RFC 6298 for TCP) would reduce that.")
+P(f"**Optimisation 3 – adaptive retransmission timeout.** The loss experiments used a fixed 50 ms per-attempt timeout, so every lost datagram cost a full 50 ms "
+  f"even though the round trip takes about 0.1 ms; at 40% loss with 4 retries the mean response was {f1(RTO40['fixed']['mean_ms'])} ms. The client now has an optional "
+  f"`RTTEstimator` that follows RFC 6298 [12]: SRTT and RTTVAR are smoothed from RTT samples (α = 1/8, β = 1/4), RTO = SRTT + 4·RTTVAR clamped to [5 ms, 2 s], only replies to "
+  f"first transmissions are sampled (Karn’s rule), and each retransmission doubles the timeout. Both variants were run against the same seeded loss sequence "
+  f"({E9['queries']} DNS queries per cell, 4 retries).")
+table(["Loss p", "Fixed: success", "Fixed: mean / p95 (ms)", "Adaptive: success", "Adaptive: mean / p95 (ms)", "Speed-up (mean)", "Learned RTO (ms)"],
+      [[pc(r["loss_per_datagram"]), pc(r["fixed"]["success"]), f"{f2(r['fixed']['mean_ms'])} / {f2(r['fixed']['p95_ms'])}", pc(r["adaptive"]["success"]),
+        f"{f2(r['adaptive']['mean_ms'])} / {f2(r['adaptive']['p95_ms'])}",
+        f"{r['fixed']['mean_ms'] / r['adaptive']['mean_ms']:.1f}×" if r["loss_per_datagram"] > 0 else "—", f2(r["adaptive"]["median_rto_ms"])] for r in E9["rows"]],
+      widths=[0.6, 0.8, 1.15, 0.85, 1.2, 0.8, 0.85], cap="Fixed versus adaptive retransmission timeout (DNS, 4 retries)", size=9, label="rto")
+figure("fig_rto.png", 6.2, "Fixed 50 ms timeout versus adaptive RTO: response time (left) and success rate (right)")
+P(f"The success rate is identical in every row, which confirms that reliability is set by the *number* of attempts, not by their timing. The response time, however, "
+  f"falls by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}×. On loopback the learned RTO sits at the 5 ms floor, so the floor (not the RTT) now dominates; on a real network with "
+  f"tens of milliseconds of RTT the estimator would track the path instead. The trade-off is that a too-small floor causes spurious retransmissions on a path whose delay suddenly rises, "
+  f"which is why RFC 6298 recommends a conservative minimum on the open Internet.")
 P("**Threats to validity.** All traffic is on loopback, so there is no propagation delay, queueing in routers, MTU fragmentation or real loss; absolute numbers will be lower on a real network and "
   "the *relative* conclusions (TCP versus UDP behaviour, effect of retries, effect of optimisations) are the findings to rely on. Client and server share CPU cores, and the Python load generators "
   "contribute their own latency. Results come from one machine and one session.")
@@ -633,7 +650,8 @@ bullets([
     f"**Packet loss.** The measured round-trip loss follows 1−(1−p)² within {MAXDEV_RAW:.1f} percentage points at every setting. With no retransmission, 20% datagram loss means "
     f"{pc(1 - dns_at(loss20, 0)['success'])} of DNS queries fail; two retries restore {pc(dns_at(loss20, 2)['success'])} success (theory {pc(dns_at(loss20, 2)['theory_success'])}). "
     f"At 40% loss four retries still reach {pc(dns_at(loss40, 4)['success'])}. Across all 24 loss/retry cells the measured success rate is within {MAXDEV_SUCC:.1f} percentage points of the model (binomial standard error at most {MAXSE:.1f} points with n = {NQ:,} queries per cell). *Inference:* the success rate follows 1−(1−(1−p)²)^(r+1) closely (slightly below it at 30–40% loss), so the retry budget can be chosen analytically: two retries give ≥99% success up to 10% loss "
-    f"({pc(dns_at(loss10, 2)['success'])} measured).",
+    f"({pc(dns_at(loss10, 2)['success'])} measured). Making the timeout adaptive (RFC 6298 style) keeps the same success rate but cuts the response time of lossy queries by "
+    f"{min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× ({REF['rto']}).",
     f"**Reliability under failure.** All {T['total']} tests pass, including aborted uploads (no partial file remains), checksum corruption, path traversal, oversize inputs, malformed and looping DNS packets, idle-timeout and busy-server limits. "
     f"A crashed server is detected in {E7['crashed_server']['detected_after_s'] * 1000:.2f} ms, a hung one at the configured timeout ({f3(E7['hung_server']['detected_after_s'])} s for 1.0 s), and a dead UDP peer only after the retry budget ({f3(E7['udp_dead_server']['detected_after_s'])} s).",
     f"**Resources.** Idle server RSS is {f1(idle0['rss_mb'])} MB; each open connection adds ≈{f1(idle2000['kb_per_conn'])} KB and one thread; server CPU follows load (1% at 1 client, ≈{f0(by(E2, 'clients', 50)['cpu_pct'])}% at 50). "
@@ -646,6 +664,7 @@ table(["Contribution", "What is new / non-trivial", "Evidence in this report"],
        ["Closed-form retry model validated experimentally", "Success = 1−(1−(1−p)²)^(r+1) predicts DNS reliability and lets the retry budget be dimensioned", f"{REF['loss_tab']}: measured vs theory in every cell"],
        ["Atomic, verified file transfer", "SHA-256 announced before data, verified on both ends, temp file + atomic rename, cleanup on abort", "Tests on checksum mismatch, aborted upload, concurrent uploads"],
        ["Measured, root-caused optimisations", "Found a download/upload asymmetry through measurement, explained it (double file read), fixed it with a safe digest cache, and quantified `sendfile()`", f"+{(dl_dc100 / dl_base100 - 1) * 100:.0f}% download throughput; {c8[3]['cpu_pct'] / c8[0]['cpu_pct'] * 100:.0f}% CPU at 8 clients ({REF['file_conc']}, {REF['fig_files.png']})"],
+       ["Adaptive retransmission timer", "RFC 6298 estimator (SRTT/RTTVAR, Karn’s rule, exponential back-off) applied to UDP request/response", f"Same success, {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× lower latency ({REF['rto']}, {REF['fig_rto.png']})"],
        ["Honest scalability analysis", "Connection-burst limit, GIL ceiling, per-connection memory and thread cap all measured and explained", f"{REF['conc']}, {REF['idle']}; Section 9.e"],
        ["Observability", "`STATS` command returns live counters, CPU and memory; key=value logs are machine-parseable", f"{REF['term_concurrency.png']}, {REF['term_log.png']}"]],
       widths=[1.7, 2.7, 2.0], cap="Innovation and evidence summary", size=9)
@@ -668,14 +687,14 @@ bullets([
     "A burst of more than roughly 200 simultaneous new connections can overflow the kernel accept queue (default `somaxconn` 128).",
     "No encryption or authentication: any client that can reach the ports can read, write and list files.",
     "The DNS service is authoritative only: no recursion (apart from simple forwarding), no EDNS0, no DNS over TCP for truncated answers, no DNSSEC, no wildcard records.",
-    "The file service has no resume, quotas or directories, and the UDP client uses a fixed (non-adaptive) timeout.",
+    "The file service has no resume, quotas or directories. The adaptive UDP timeout uses a 5 ms floor tuned for a LAN, not the 1 s minimum RFC 6298 recommends for the open Internet.",
 ])
 H3("Future enhancements")
 bullets([
     "Run the same experiments across two hosts or with Linux `tc netem` / Mininet to add real delay and loss, and capture traffic with Wireshark to confirm the packet-level behaviour.",
     "Add TLS (`ssl`) and token-based authentication; per-client rate limiting.",
     "Raise `kern.ipc.somaxconn` and the listen backlog; replace thread-per-connection with an `asyncio` or `epoll` event loop, or several processes sharing a port with `SO_REUSEPORT`, and measure the effect.",
-    "Adaptive UDP timeouts with an RTT estimator and exponential back-off; DNS over TCP, EDNS0 and negative caching.",
+    "Per-destination RTT estimators shared across requests; DNS over TCP, EDNS0 and negative caching.",
     "Resumable, chunked file transfer with parallel streams; compare TCP congestion-control algorithms (Cubic, BBR) on the transfer service.",
     "Export metrics in Prometheus format and add a small dashboard.",
 ])
