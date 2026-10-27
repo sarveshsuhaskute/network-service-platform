@@ -129,7 +129,9 @@ def analyze(pkts):
                     n = struct.unpack("!H", buf[:2])[0]
                     qid, is_resp, txt = dns_info(buf[2:2 + n])
                     info += f"  | {txt} (over TCP)"
-                    dns_events.append({"no": i, "t": p["t"], "id": qid, "response": is_resp, "transport": "tcp", "info": txt})
+                    client = f"{p['dst']}:{p['dport']}" if is_resp else f"{p['src']}:{p['sport']}"
+                    dns_events.append({"no": i, "t": p["t"], "id": qid, "response": is_resp, "transport": "tcp", "info": txt,
+                                       "client": client})
                     buf = buf[2 + n:]
                 tcp_dns_buf[(p["src"], p["sport"])] = buf
             elif svc == "echo" and len(p["payload"]) >= 4:
@@ -163,13 +165,15 @@ def analyze(pkts):
                                "data_packets": sum(1 for e in ev if e["len"]), "fin_packets": len(fins),
                                "rst_packets": len(rsts), "packets": len(ev)})
 
-    # DNS transactions: group by ID; >1 query with one ID = retransmission
+    # DNS transactions: a transaction is (ID, transport, client endpoint) – each query uses its own socket, so the
+    # client port separates queries that happen to share an ID; >1 query in one transaction = retransmission
     tx = {}
     for e in dns_events:
         if e["id"] is None:
             continue
-        t = tx.setdefault((e["id"], e["transport"] if e["transport"] == "tcp" else "udp"), {"id": e["id"], "transport": e["transport"],
-                                                                                         "queries": [], "responses": []})
+        key = (e["id"], e["transport"], e["client"])
+        t = tx.setdefault(key, {"id": e["id"], "transport": e["transport"], "client": e["client"],
+                                "queries": [], "responses": []})
         (t["responses"] if e["response"] else t["queries"]).append({"no": e["no"], "t": e["t"], "info": e["info"]})
     transactions = []
     for t in tx.values():

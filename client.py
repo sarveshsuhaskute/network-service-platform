@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
 import socket
 import ssl
 import struct
@@ -226,7 +227,7 @@ def udp_echo(host, port, payload, timeout=0.5, retries=2, estimator=None):
     return udp_request(host, port, payload, lambda d: d == payload, timeout, retries, estimator)
 
 
-_txid = 0
+_txid = secrets.randbelow(0x10000)                       # random start, like real resolvers (RFC 5452)
 _txid_lock = threading.Lock()
 
 

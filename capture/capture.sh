@@ -12,6 +12,18 @@ PY=${PY:-python3}
 IF=lo0; [ "$(uname)" = Linux ] && IF=lo
 as_user() { sudo -u "$U" "$@"; }
 PORTS="--echo-port 19001 --file-port 19002 --udp-echo-port 19003 --dns-port 19053"
+# stop anything left over from an earlier, interrupted run
+pkill -f "tcpdump -i $IF .*port 19053" 2>/dev/null || true
+pkill -f "server.py --echo-port 19001" 2>/dev/null || true
+sleep 0.5
+TD=""; SRV=""
+cleanup() {
+  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null || true
+  [ -n "$TD" ] && kill -INT "$TD" 2>/dev/null || true
+  pkill -f "server.py --echo-port 19001" 2>/dev/null || true
+  [ -f results/capture.pcap ] && chown "$U" results/capture.pcap || true
+}
+trap cleanup EXIT
 WORK=$(as_user mktemp -d)
 as_user mkdir -p "$WORK/storage" results logs
 head -c 20000 /dev/urandom | as_user tee "$WORK/sample.bin" > /dev/null
@@ -27,10 +39,10 @@ SRV=$!; sleep 1
 as_user "$PY" client.py echo "hello over TCP" --port 19001
 as_user "$PY" client.py udp-echo "hello over UDP" --port 19003
 as_user "$PY" client.py dns web.campus.lab --port 19053
-as_user "$PY" client.py dns big.campus.lab --port 19053          # truncated over UDP -> TCP fallback
+as_user "$PY" client.py dns big.campus.lab --port 19053 | head -4   # truncated over UDP -> TCP fallback
 as_user "$PY" client.py dns nosuchhost.campus.lab --port 19053
-(cd "$WORK" && as_user "$PY" "$OLDPWD/client.py" file put sample.bin --port 19002)
-as_user "$PY" client.py file list --port 19002
+(cd "$WORK" && as_user "$PY" "$OLDPWD/client.py" file --port 19002 put sample.bin)
+as_user "$PY" client.py file --port 19002 list
 kill $SRV; wait $SRV 2>/dev/null || true; sleep 0.5
 
 echo "[2/2] 40% simulated datagram loss: DNS retransmissions with 200 ms timeout"
@@ -39,6 +51,7 @@ SRV=$!; sleep 1
 for n in 1 2 3 4 5 6; do as_user "$PY" client.py dns web.campus.lab --port 19053 --timeout 0.2 --retries 4 || true; done
 kill $SRV; wait $SRV 2>/dev/null || true
 sleep 0.5; kill -INT $TD; wait $TD 2>/dev/null || true
+TD=""; SRV=""
 chown "$U" results/capture.pcap
 rm -rf "$WORK"
 echo; as_user "$PY" capture/analyze_pcap.py results/capture.pcap | tail -40

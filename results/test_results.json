@@ -3,7 +3,7 @@
   "failures": 0,
   "errors": 0,
   "skipped": 0,
-  "seconds": 17.54,
+  "seconds": 14.86,
   "tests": [
     {
       "id": "TestCaptureAnalyzer.test_decodes_handshake_dns_and_retransmission",
