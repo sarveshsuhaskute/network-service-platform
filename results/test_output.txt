@@ -87,7 +87,7 @@ The RFC 6298-style estimator learns a sub-millisecond RTO and still recovers que
 test_client_detects_dead_server (test_platform.TestLossyUDP.test_client_detects_dead_server)
 With no server listening, the client reports ConnectionError after bounded retries and UDP times out. ... ok
 test_delay_emulation_and_rto_tracking (test_platform.TestLossyUDP.test_delay_emulation_and_rto_tracking)
-With 20 ms emulated delay the measured RTT is ~20 ms and the adaptive RTO settles above it. ... ok
+With 20 ms emulated delay every RTT exceeds 17 ms, SRTT tracks the measured RTT and the RTO settles above it. ... ok
 test_retransmission_recovers_from_loss (test_platform.TestLossyUDP.test_retransmission_recovers_from_loss)
 With 30% simulated loss per datagram, 3 attempts recover most queries (>80%) while some still fail. ... ok
 test_missing_token_rejected (test_platform.TestTLSAndAuth.test_missing_token_rejected)
@@ -104,6 +104,6 @@ test_udp_echo (test_platform.TestUDPEcho.test_udp_echo)
 UDP echo returns the datagram on the first attempt when there is no loss. ... ok
 
 ----------------------------------------------------------------------
-Ran 52 tests in 17.306s
+Ran 52 tests in 17.521s
 
 OK

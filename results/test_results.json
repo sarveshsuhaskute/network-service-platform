@@ -3,7 +3,7 @@
   "failures": 0,
   "errors": 0,
   "skipped": 0,
-  "seconds": 17.32,
+  "seconds": 17.54,
   "tests": [
     {
       "id": "TestCaptureAnalyzer.test_decodes_handshake_dns_and_retransmission",
@@ -227,7 +227,7 @@
     },
     {
       "id": "TestLossyUDP.test_delay_emulation_and_rto_tracking",
-      "description": "With 20 ms emulated delay the measured RTT is ~20 ms and the adaptive RTO settles above it.",
+      "description": "With 20 ms emulated delay every RTT exceeds 17 ms, SRTT tracks the measured RTT and the RTO settles above it.",
       "status": "PASS"
     },
     {
