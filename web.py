@@ -127,28 +127,43 @@ def api_load(b):
     clients, reqs, size = max(1, min(int(b.get("clients", 20)), 200)), max(1, min(int(b.get("requests", 50)), 200)), 1024
     lats, errs, lock = [], [0], threading.Lock()
     payload = os.urandom(size)
+    ready = threading.Barrier(clients + 1)               # all clients connect first, then start together
 
     def worker():
-        loc, e = [], 0
+        loc, e, c = [], 0, None
         try:
-            with cl.EchoClient(port=PLAT.ports["echo"], timeout=15) as c:
-                for _ in range(reqs):
-                    loc.append(c.echo(payload)[1])
+            c = cl.EchoClient(port=PLAT.ports["echo"], timeout=15)
         except Exception:
             e += 1
+        try:
+            ready.wait(timeout=30)
+        except threading.BrokenBarrierError:
+            pass
+        if c:
+            try:
+                for _ in range(reqs):
+                    loc.append(c.echo(payload)[1])
+            except Exception:
+                e += 1
+            finally:
+                c.close()
         with lock:
             lats.extend(loc)
             errs[0] += e
 
     ts = [threading.Thread(target=worker) for _ in range(clients)]
-    t0 = time.perf_counter()
     for t in ts:
         t.start()
-        time.sleep(0.002)
+        time.sleep(0.002)                                # paced arrivals (macOS listen queue holds 128)
+    try:
+        ready.wait(timeout=30)
+    except threading.BrokenBarrierError:
+        pass
+    t0 = time.perf_counter()
     for t in ts:
         t.join()
     wall = time.perf_counter() - t0
-    out = [f"clients={clients}  requests/client={reqs}  payload={size} B",
+    out = [f"clients={clients} (all connected before sending)  requests/client={reqs}  payload={size} B",
            f"total requests : {len(lats)}   failed clients: {errs[0]}",
            f"wall time      : {wall:.3f} s   throughput: {len(lats) / wall:,.0f} req/s"]
     if lats:

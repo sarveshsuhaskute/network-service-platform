@@ -210,7 +210,7 @@ async function tick(){
     const s=await (await fetch('/api/stats')).json();if(first){svcStatus(s);first=false}renderStats(s);
     const l=await (await fetch('/api/logs?since='+since)).json();since=l.n;
     if(l.lines.length){const e=$('log');const bottom=e.scrollTop+e.clientHeight>=e.scrollHeight-20;
-      e.innerHTML+=l.lines.map(x=>`<span class="${/WARNING/.test(x)?'lw':/ERROR/.test(x)?'err':'dim'}">${esc(x)}</span>`).join('\n')+'\n';
+      e.innerHTML+=l.lines.map(x=>`<span class="${/\|\s*WARNING\s*\|/.test(x)?'lw':/\|\s*(ERROR|CRITICAL)\s*\|/.test(x)?'err':'dim'}">${esc(x)}</span>`).join('\n')+'\n';
       if(e.innerHTML.length>200000)e.innerHTML=e.innerHTML.slice(-100000);
       if(bottom)e.scrollTop=e.scrollHeight}
   }catch(e){}
