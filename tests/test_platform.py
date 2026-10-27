@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import client as cl                      # noqa: E402
 import dns_wire as dw                    # noqa: E402
 import server as sv                      # noqa: E402
-from protocol import HDR, ConnectionClosed, ProtocolError  # noqa: E402
+from protocol import HDR, ConnectionClosed  # noqa: E402
 
 ZONE = os.path.join(os.path.dirname(__file__), "..", "zone.json")
 sv.log.addHandler(__import__("logging").NullHandler())
@@ -98,6 +98,26 @@ class TestEcho(Base):
         self.assertGreater(self.plat.stats.snapshot()["counters"].get("echo.aborted", 0), before)
         with cl.EchoClient(port=self.ports["echo"]) as c:
             self.assertEqual(c.echo(b"still alive")[0], b"still alive")
+
+
+class TestEchoEventLoop(TestEcho):
+    """Re-runs every echo test against the selectors event-loop implementation."""
+    plat_kwargs = {"echo_io": "selectors"}
+
+    def test_idle_timeout_event_loop(self):
+        """The event loop drops a client that stays idle longer than the idle timeout."""
+        tmp = tempfile.TemporaryDirectory()
+        plat = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=tmp.name, zone=ZONE,
+                           idle_timeout=0.5, echo_io="selectors").start()
+        try:
+            s = socket.create_connection(("127.0.0.1", plat.ports["echo"]), timeout=3)
+            t0 = time.time()
+            self.assertEqual(s.recv(10), b"")
+            self.assertLess(time.time() - t0, 2)
+            s.close()
+        finally:
+            plat.stop()
+            tmp.cleanup()
 
 
 class TestFile(Base):
@@ -301,6 +321,40 @@ class TestDNS(Base):
                              capture_output=True, text=True, timeout=10).stdout.split()
         self.assertEqual(sorted(out), ["10.10.0.10", "10.10.0.11"])
 
+    def test_large_answer_truncated_over_udp(self):
+        """A 40-record answer exceeds the 512-byte UDP limit: the server sets TC and drops the answers."""
+        r = cl.dns_query("127.0.0.1", self.ports["dns"], "big.campus.lab", tcp_fallback=False)[0]
+        self.assertTrue(r.tc)
+        self.assertEqual(r.answers, [])
+
+    def test_tcp_fallback_returns_all_records(self):
+        """On a truncated UDP answer the client retries over TCP and receives all 40 records."""
+        r = cl.dns_query("127.0.0.1", self.ports["dns"], "big.campus.lab")[0]
+        self.assertEqual((r.transport, r.tc, len(r.answers)), ("tcp", False, 40))
+
+    def test_dns_over_tcp_pipelined(self):
+        """Two queries sent back-to-back on one TCP connection get two correctly matched answers (RFC 7766)."""
+        s = socket.create_connection(("127.0.0.1", self.ports["dns-tcp"]), timeout=3)
+        q1, q2 = dw.build_query("web.campus.lab", "A", 101), dw.build_query("campus.lab", "MX", 102)
+        s.sendall(struct.pack("!H", len(q1)) + q1 + struct.pack("!H", len(q2)) + q2)
+        got = []
+        for _ in range(2):
+            (n,) = struct.unpack("!H", cl.recv_exact(s, 2))
+            got.append(dw.parse_response(cl.recv_exact(s, n)))
+        s.close()
+        self.assertEqual([g.id for g in got], [101, 102])
+        self.assertEqual(got[1].answers[0].value, "10 mail.campus.lab")
+
+    def test_dig_over_tcp(self):
+        """`dig +tcp` (independent implementation) receives all 40 records over DNS-over-TCP."""
+        import shutil
+        import subprocess
+        if not shutil.which("dig"):
+            self.skipTest("dig not installed")
+        out = subprocess.run(["dig", "+tcp", "+short", "@127.0.0.1", "-p", str(self.ports["dns"]), "big.campus.lab"],
+                             capture_output=True, text=True, timeout=10).stdout.split()
+        self.assertEqual(len(out), 40)
+
     def test_concurrent_dns(self):
         """20 threads x 50 queries all receive correct answers."""
         bad = []
@@ -315,6 +369,148 @@ class TestDNS(Base):
         [t.start() for t in ts]
         [t.join() for t in ts]
         self.assertEqual(bad, [])
+
+
+class TestTLSAndAuth(unittest.TestCase):
+    TOKEN = "s3cret-lab-token"
+
+    @classmethod
+    def setUpClass(cls):
+        import shutil
+        import subprocess
+        if not shutil.which("openssl"):
+            raise unittest.SkipTest("openssl not installed")
+        cls.tmp = tempfile.TemporaryDirectory()
+        subprocess.run([os.path.join(os.path.dirname(__file__), "..", "tools", "make_cert.sh"), cls.tmp.name],
+                       check=True, capture_output=True)
+        cls.cert, key = os.path.join(cls.tmp.name, "server.crt"), os.path.join(cls.tmp.name, "server.key")
+        cls.root = os.path.join(cls.tmp.name, "files")
+        cls.plat = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=cls.root, zone=ZONE,
+                               tls=(cls.cert, key), auth_token=cls.TOKEN).start()
+        cls.port = cls.plat.ports["file"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.plat.stop()
+        cls.tmp.cleanup()
+
+    def test_tls_transfer_with_token(self):
+        """Over TLS with a valid token, an upload/download round trip is byte-identical (TLS 1.2+ negotiated)."""
+        src = os.path.join(self.tmp.name, "secret.bin")
+        with open(src, "wb") as f:
+            f.write(os.urandom(300_000))
+        with cl.FileClient(port=self.port, tls=True, cafile=self.cert, token=self.TOKEN) as c:
+            self.assertIn(c.tls_version, ("TLSv1.2", "TLSv1.3"))
+            c.put(src)
+            dst = os.path.join(self.tmp.name, "secret.out")
+            c.get("secret.bin", dst)
+        self.assertEqual(read(src), read(dst))
+
+    def test_missing_token_rejected(self):
+        """Without AUTH every file command is refused with ERR 401 (PING still works)."""
+        with cl.FileClient(port=self.port, tls=True, cafile=self.cert) as c:
+            self.assertGreater(c.ping(), 0)
+            with self.assertRaisesRegex(cl.ServiceError, "401"):
+                c.list()
+
+    def test_wrong_token_limit(self):
+        """Three wrong tokens close the connection (brute-force limit) and are counted."""
+        before = self.plat.stats.snapshot()["counters"].get("file.auth_failures", 0)
+        with cl.FileClient(port=self.port, tls=True, cafile=self.cert) as c:
+            for _ in range(3):
+                with self.assertRaisesRegex(cl.ServiceError, "401"):
+                    c._cmd("AUTH wrong")
+            with self.assertRaises((ConnectionClosed, OSError)):
+                c._cmd("PING")
+        self.assertEqual(self.plat.stats.snapshot()["counters"]["file.auth_failures"] - before, 3)
+
+    def test_plaintext_client_on_tls_port(self):
+        """A plaintext client on the TLS port gets no service; the server logs a TLS error and keeps running."""
+        before = self.plat.stats.snapshot()["counters"].get("file.tls_errors", 0)
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=3)
+        s.sendall(b"LIST\n")
+        try:
+            data = s.recv(100)
+        except OSError:
+            data = b""
+        s.close()
+        self.assertNotIn(b"OK", data)
+        for _ in range(40):
+            if self.plat.stats.snapshot()["counters"].get("file.tls_errors", 0) > before:
+                break
+            time.sleep(0.05)
+        self.assertGreater(self.plat.stats.snapshot()["counters"].get("file.tls_errors", 0), before)
+
+    def test_untrusted_certificate_rejected(self):
+        """A client that does not trust the server's self-signed certificate refuses the connection."""
+        import ssl
+        with self.assertRaises(ssl.SSLCertVerificationError):
+            cl.FileClient(port=self.port, tls=True, cafile=None)
+
+
+class TestForwarding(unittest.TestCase):
+    def test_forwarding_cache_and_upstream_failure(self):
+        """Unknown names are forwarded upstream (non-authoritative answer), repeats hit the TTL cache,
+        and a dead upstream yields SERVFAIL instead of a hang."""
+        import json as _json
+        tmp = tempfile.TemporaryDirectory()
+        zpath = os.path.join(tmp.name, "up.json")
+        with open(zpath, "w") as f:
+            _json.dump({"ttl": 60, "records": {"ext.example.net": {"A": ["192.0.2.7"]},
+                                                "other.example.net": {"A": ["192.0.2.8"]}}}, f)
+        up = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=tmp.name, zone=zpath).start()
+        main = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=tmp.name, zone=ZONE,
+                           upstream=("127.0.0.1", up.ports["dns"])).start()
+        try:
+            port = main.ports["dns"]
+            r = cl.dns_query("127.0.0.1", port, "ext.example.net")[0]
+            self.assertEqual((r.rcode, r.answers[0].value), (0, "192.0.2.7"))
+            cl.dns_query("127.0.0.1", port, "ext.example.net")
+            c = main.stats.snapshot()["counters"]
+            self.assertEqual((c.get("dns.forwarded"), c.get("dns.cache_hits")), (1, 1))
+            self.assertTrue(cl.dns_query("127.0.0.1", port, "web.campus.lab")[0].aa)   # local zone stays authoritative
+            up.stop()
+            r = cl.dns_query("127.0.0.1", port, "other.example.net", timeout=3)[0]
+            self.assertEqual(r.rcode, dw.RCODE_SERVFAIL)
+        finally:
+            main.stop()
+            tmp.cleanup()
+
+
+class TestCaptureAnalyzer(unittest.TestCase):
+    def test_decodes_handshake_dns_and_retransmission(self):
+        """The pcap decoder finds a TCP three-way handshake, decodes DNS and counts a retransmitted query ID."""
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "capture"))
+        import analyze_pcap as ap
+
+        def ip(proto, sport, dport, l4):
+            hdr = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(l4), 0, 0, 64, proto, 0,
+                              socket.inet_aton("127.0.0.1"), socket.inet_aton("127.0.0.1"))
+            return struct.pack("<I", 2) + hdr + l4                      # DLT_NULL, AF_INET
+        def tcp(sp, dp, seq, ack, flags):
+            return ip(6, sp, dp, struct.pack("!HHIIBBHHH", sp, dp, seq, ack, 5 << 4, flags, 65535, 0, 0))
+        def udp(sp, dp, payload):
+            return ip(17, sp, dp, struct.pack("!HHHH", sp, dp, 8 + len(payload), 0) + payload)
+
+        q = dw.build_query("web.campus.lab", "A", 0x4242)
+        resp = dw.build_response(dw.parse_query(q), 0, [("web.campus.lab", 1, 300, socket.inet_aton("10.10.0.10"))])
+        frames = [tcp(50000, 19001, 100, 0, 0x02), tcp(19001, 50000, 900, 101, 0x12), tcp(50000, 19001, 101, 901, 0x10),
+                  udp(50001, 19053, q), udp(50001, 19053, q), udp(19053, 50001, resp)]
+        pcap = struct.pack("<IHHiIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 0)
+        for i, fr in enumerate(frames):
+            pcap += struct.pack("<IIII", 1000, i * 1000, len(fr), len(fr)) + fr
+        tmp = tempfile.TemporaryDirectory()
+        path = os.path.join(tmp.name, "t.pcap")
+        with open(path, "wb") as f:
+            f.write(pcap)
+        a = ap.analyze(ap.parse(path))
+        tmp.cleanup()
+        self.assertEqual(len(a["packets"]), 6)
+        hs = a["handshakes"][0]
+        self.assertEqual((hs["service"], hs["syn_no"], hs["synack_no"], hs["ack_no"]), ("echo", 1, 2, 3))
+        tx = [t for t in a["dns_transactions"] if t["id"] == 0x4242][0]
+        self.assertEqual((tx["retransmissions"], tx["answered"]), (1, True))
+        self.assertIn("10.10.0.10", tx["responses"][0]["info"])
 
 
 class TestUDPEcho(Base):
@@ -367,6 +563,21 @@ class TestLossyUDP(unittest.TestCase):
             return 1
         except socket.timeout:
             return 0
+
+    def test_delay_emulation_and_rto_tracking(self):
+        """With 20 ms emulated delay the measured RTT is ~20 ms and the adaptive RTO settles above it."""
+        tmp = tempfile.TemporaryDirectory()
+        plat = sv.Platform(echo_port=0, file_port=0, udp_echo_port=0, dns_port=0, root=tmp.name, zone=ZONE,
+                           delay=0.02, jitter=0.002).start()
+        try:
+            est = cl.RTTEstimator(initial=0.2)
+            rtts = [cl.dns_query("127.0.0.1", plat.ports["dns"], "web.campus.lab", retries=4, estimator=est)[1]
+                    for _ in range(30)]
+            self.assertTrue(0.017 < sorted(rtts)[15] < 0.035, sorted(rtts)[15])
+            self.assertTrue(0.02 < est.rto() < 0.08, est.rto())
+        finally:
+            plat.stop()
+            tmp.cleanup()
 
     def test_client_detects_dead_server(self):
         """With no server listening, the client reports ConnectionError after bounded retries and UDP times out."""

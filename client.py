@@ -5,12 +5,14 @@ import hashlib
 import json
 import os
 import socket
+import ssl
 import struct
 import sys
+import threading
 import time
 
 import dns_wire as dw
-from protocol import CHUNK, HDR, ConnectionClosed, ProtocolError, recv_exact, recv_frame, send_frame
+from protocol import CHUNK, ConnectionClosed, ProtocolError, recv_exact, recv_frame, send_frame
 
 
 class ServiceError(Exception):
@@ -58,10 +60,21 @@ class EchoClient:
 
 
 class FileClient:
-    def __init__(self, host="127.0.0.1", port=9002, timeout=10.0):
+    """File-service client. tls=True wraps the connection in TLS and verifies the server certificate against
+    `cafile`; `token` is sent with AUTH when the server requires authentication."""
+
+    def __init__(self, host="127.0.0.1", port=9002, timeout=10.0, tls=False, cafile=None, token=None):
         self.sock = tcp_connect(host, port, timeout)
         self.sock.settimeout(timeout)
+        self.tls_version = None
+        if tls:
+            ctx = ssl.create_default_context(cafile=cafile)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
+            self.tls_version = self.sock.version()
         self.f = self.sock.makefile("rb", CHUNK)
+        if token:
+            self._cmd(f"AUTH {token}")
 
     def _line(self):
         line = self.f.readline(2048)
@@ -214,20 +227,46 @@ def udp_echo(host, port, payload, timeout=0.5, retries=2, estimator=None):
 
 
 _txid = 0
+_txid_lock = threading.Lock()
 
 
-def dns_query(host, port, name, qtype="A", timeout=0.5, retries=2, estimator=None):
-    """Resolve name. Returns (Response, total_seconds, attempts)."""
+def _next_txid():
     global _txid
-    _txid = (_txid + 1) & 0xFFFF
-    qid = _txid
+    with _txid_lock:                                     # unique IDs even when many threads resolve at once
+        _txid = (_txid + 1) & 0xFFFF
+        return _txid
+
+
+def dns_query_tcp(host, port, name, qtype="A", timeout=2.0):
+    """Resolve name over TCP (2-byte length prefix). Returns (Response, seconds)."""
+    qid = _next_txid()
+    pkt = dw.build_query(name, qtype, qid)
+    t0 = time.perf_counter()
+    with socket.create_connection((host, port), timeout=timeout) as s:
+        s.settimeout(timeout)
+        s.sendall(struct.pack("!H", len(pkt)) + pkt)
+        (n,) = struct.unpack("!H", recv_exact(s, 2))
+        data = recv_exact(s, n)
+    if struct.unpack("!H", data[:2])[0] != qid:
+        raise ProtocolError("DNS transaction ID mismatch over TCP")
+    return dw.parse_response(data)._replace(transport="tcp"), time.perf_counter() - t0
+
+
+def dns_query(host, port, name, qtype="A", timeout=0.5, retries=2, estimator=None, tcp_fallback=True):
+    """Resolve name over UDP; if the answer is truncated (TC bit) retry over TCP like a real stub resolver.
+    Returns (Response, total_seconds, udp_attempts). Response.transport says which transport answered."""
+    qid = _next_txid()
     pkt = dw.build_query(name, qtype, qid)
 
     def match(d):
         return len(d) >= 12 and struct.unpack("!H", d[:2])[0] == qid
 
     data, secs, attempts = udp_request(host, port, pkt, match, timeout, retries, estimator)
-    return dw.parse_response(data), secs, attempts
+    resp = dw.parse_response(data)
+    if resp.tc and tcp_fallback:
+        resp, tcp_secs = dns_query_tcp(host, port, name, qtype, max(timeout, 1.0))
+        secs += tcp_secs
+    return resp, secs, attempts
 
 
 def rate(n, secs):
@@ -255,8 +294,12 @@ def main():
     d.add_argument("--timeout", type=float, default=0.5)
     d.add_argument("--retries", type=int, default=2)
     d.add_argument("--adaptive", action="store_true", help="adaptive (RFC 6298-style) retransmission timeout")
+    d.add_argument("--tcp", action="store_true", help="query over TCP instead of UDP")
     f = sub.add_parser("file", help="file transfer")
     f.add_argument("--port", type=int, default=9002)
+    f.add_argument("--tls", action="store_true", help="connect over TLS")
+    f.add_argument("--cafile", help="CA / self-signed certificate used to verify the server")
+    f.add_argument("--token", default=os.environ.get("NETPLATFORM_TOKEN"), help="authentication token")
     fs = f.add_subparsers(dest="op", required=True)
     fs.add_parser("list")
     fs.add_parser("stats")
@@ -274,13 +317,20 @@ def main():
             r, secs, n = udp_echo(a.host, a.port, a.text.encode(), a.timeout, a.retries)
             print(f"{r.decode()!r}  ({secs * 1000:.3f} ms, {n} attempt(s))")
         elif a.cmd == "dns":
-            r, secs, n = dns_query(a.host, a.port, a.name, a.type, a.timeout, a.retries,
-                                   RTTEstimator(initial=a.timeout) if a.adaptive else None)
-            print(f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} tc={int(r.tc)} time={secs * 1000:.3f} ms attempts={n}")
+            if a.tcp:
+                (r, secs), n = dns_query_tcp(a.host, a.port, a.name, a.type, max(a.timeout, 1.0)), 1
+            else:
+                r, secs, n = dns_query(a.host, a.port, a.name, a.type, a.timeout, a.retries,
+                                       RTTEstimator(initial=a.timeout) if a.adaptive else None)
+            note = "  (UDP answer truncated, retried over TCP)" if r.transport == "tcp" and not a.tcp else ""
+            print(f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} transport={r.transport} time={secs * 1000:.3f} ms "
+                  f"attempts={n}{note}")
             for ans in r.answers:
                 print(f"{ans.name}\t{ans.ttl}\tIN\t{dw.QTYPE_NAMES.get(ans.rtype, ans.rtype)}\t{ans.value}")
         else:
-            with FileClient(a.host, a.port) as c:
+            with FileClient(a.host, a.port, tls=a.tls, cafile=a.cafile, token=a.token) as c:
+                if c.tls_version:
+                    print(f";; {c.tls_version} connection, server certificate verified", flush=True)
                 if a.op == "list":
                     for it in c.list():
                         print(f"{it['size']:>12}  {it['name']}")

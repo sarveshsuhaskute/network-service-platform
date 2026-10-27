@@ -9,10 +9,11 @@ QTYPES = {"A": 1, "CNAME": 5, "MX": 15, "TXT": 16, "AAAA": 28}
 QTYPE_NAMES = {v: k for k, v in QTYPES.items()}
 CLASS_IN = 1
 UDP_LIMIT = 512
+TCP_LIMIT = 65535
 
 Query = namedtuple("Query", "id opcode rd qname qtype qclass question")
 Answer = namedtuple("Answer", "name rtype ttl value")
-Response = namedtuple("Response", "id rcode aa tc qname answers")
+Response = namedtuple("Response", "id rcode aa tc qname answers transport", defaults=("udp",))
 
 
 class DNSFormatError(Exception):
@@ -125,8 +126,9 @@ def decode_rdata(data, rtype, off, rdlen):
     return rd.hex()
 
 
-def build_response(q, rcode, answers, aa=True, ra=False):
-    """answers: list of (owner_name, rtype, ttl, rdata_bytes)."""
+def build_response(q, rcode, answers, aa=True, ra=False, limit=UDP_LIMIT):
+    """answers: list of (owner_name, rtype, ttl, rdata_bytes). Over UDP (limit 512) a larger message is
+    truncated: TC is set and the answers are dropped, telling the client to retry over TCP."""
     body = bytearray()
     for name, rtype, ttl, rdata in answers:
         if name.lower() == q.qname.lower():
@@ -136,7 +138,7 @@ def build_response(q, rcode, answers, aa=True, ra=False):
         body += struct.pack("!HHIH", rtype, CLASS_IN, ttl, len(rdata)) + rdata
     flags = 0x8000 | (q.opcode << 11) | (int(aa) << 10) | (q.rd << 8) | (int(ra) << 7) | rcode
     msg = struct.pack("!HHHHHH", q.id, flags, 1, len(answers), 0, 0) + q.question + bytes(body)
-    if len(msg) > UDP_LIMIT:                         # classic UDP size limit: set TC, drop answers
+    if len(msg) > limit:                             # classic UDP size limit: set TC, drop answers
         flags |= 0x0200
         msg = struct.pack("!HHHHHH", q.id, flags, 1, 0, 0, 0) + q.question
     return msg

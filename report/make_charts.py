@@ -153,6 +153,45 @@ def fig_rto():
     save("fig_rto.png")
 
 
+# 5c. threads vs event loop
+def fig_eventloop():
+    if "e11" not in R:
+        return
+    t, e = R["e11"]["threads"], R["e11"]["selectors"]
+    fig, ax = plt.subplots(1, 3, figsize=(14, 3.8))
+    fig.subplots_adjust(wspace=0.35)
+    for res, col, lab in ((t, BLUE, "thread per connection"), (e, GREEN, "selectors event loop")):
+        ax[0].plot([x["idle_connections"] for x in res["idle"]], [x["rss_mb"] for x in res["idle"]], "o-", color=col, label=lab)
+        ax[1].plot([x["clients"] for x in res["load"]], [x["req_per_s"] for x in res["load"]], "o-", color=col, label=lab)
+        ax[2].plot([x["clients"] for x in res["load"]], [x["p95_ms"] for x in res["load"]], "o-", color=col, label=lab)
+    ax[0].set_xlabel("open idle connections"); ax[0].set_ylabel("server RSS (MB)"); ax[0].set_title("Memory per connection")
+    ax[1].set_xscale("log"); ax[1].set_xlabel("concurrent clients"); ax[1].set_ylabel("requests / s"); ax[1].set_title("Echo throughput")
+    ax[2].set_xscale("log"); ax[2].set_yscale("log"); ax[2].set_xlabel("concurrent clients"); ax[2].set_ylabel("p95 latency (ms)")
+    ax[2].set_title("Tail latency")
+    for a in ax:
+        a.legend(fontsize=8)
+    save("fig_eventloop.png")
+
+
+# 5d. adaptive RTO under emulated delay
+def fig_delay_rto():
+    if "e13" not in R:
+        return
+    rows = R["e13"]["rows"]
+    p = [r["loss_per_datagram"] * 100 for r in rows]
+    modes = (("fixed50", RED, "fixed 50 ms"), ("fixed20", ORANGE, "fixed 20 ms (< RTT)"), ("adaptive", GREEN, "adaptive RTO + back-off"))
+    fig, ax = plt.subplots(1, 2, figsize=(10, 3.6))
+    for m, col, lab in modes:
+        ax[0].plot(p, [r[m]["mean_ms"] for r in rows], "o-", color=col, label=lab)
+        ax[1].plot(p, [r[m]["datagrams_per_query"] for r in rows], "o--" if m == "fixed50" else "o-", color=col, label=lab,
+                   lw=3.5 if m == "fixed50" else 1.6, alpha=0.55 if m == "fixed50" else 1, zorder=1 if m == "fixed50" else 2)
+    ax[0].set_xlabel("simulated loss per datagram (%)"); ax[0].set_ylabel("mean response time (ms)")
+    ax[0].set_title("Latency with 20 ± 5 ms emulated RTT"); ax[0].legend(fontsize=8)
+    ax[1].set_xlabel("simulated loss per datagram (%)"); ax[1].set_ylabel("datagrams sent per query")
+    ax[1].set_title("Network load (fixed 50 ms and adaptive coincide)"); ax[1].legend(fontsize=8)
+    save("fig_delay_rto.png")
+
+
 # 6. resources
 def fig_resources():
     e6 = R["e6"]
@@ -192,12 +231,12 @@ def fig_architecture():
     ax.add_patch(FancyBboxPatch((3.4, 0.35), 7.3, 5.45, boxstyle="round,pad=0.02,rounding_size=0.1", fc="#f7fafc", ec="#2d3748", lw=1.4))
     ax.text(7.05, 5.5, "SERVER PROCESS", fontsize=10, fontweight="bold", ha="center")
     box(3.65, 4.15, 2.2, 0.9, "TCP :9001\nEcho service", "#ebf4ff", bold=True)
-    box(3.65, 2.85, 2.2, 0.9, "TCP :9002\nFile service", "#ebf4ff", bold=True)
+    box(3.65, 2.85, 2.2, 0.9, "TCP :9002\nFile service (TLS opt.)", "#ebf4ff", bold=True)
     box(3.65, 1.55, 2.2, 0.9, "UDP :9003\nUDP echo", "#fffaf0", bold=True)
-    box(3.65, 0.55, 2.2, 0.75, "UDP :9053\nDNS service", "#fffaf0", bold=True)
-    box(6.2, 3.55, 2.1, 1.5, "TCP accept loop\n+ dispatcher\n→ 1 thread / connection\nidle timeout, max clients", "#e6fffa", fs=8)
-    box(6.2, 0.55, 2.1, 1.9, "UDP receive loop\n→ worker thread pool\nsimulated loss hook\n(--loss)", "#e6fffa", fs=8)
-    box(8.6, 3.55, 1.95, 1.5, "Failure handling\ntimeouts · resets\nprotocol errors\nsize / path checks", "#fff5f5", fs=8)
+    box(3.65, 0.55, 2.2, 0.75, "UDP+TCP :9053\nDNS service", "#fffaf0", bold=True)
+    box(6.2, 3.55, 2.1, 1.5, "TCP accept + dispatch\n→ 1 thread / connection\n(or selectors event loop)\nidle timeout, max clients", "#e6fffa", fs=8)
+    box(6.2, 0.55, 2.1, 1.9, "UDP receive loop\n→ worker thread pool\nloss / delay emulation\n(--loss, --delay-ms)", "#e6fffa", fs=8)
+    box(8.6, 3.55, 1.95, 1.5, "Failure handling\ntimeouts · resets · TLS\nprotocol errors, AUTH\nsize / path checks", "#fff5f5", fs=8)
     box(8.6, 2.15, 1.95, 1.1, "Stats counters\n+ rotating log\nlogs/server.log", "#f0fff4", fs=8)
     box(8.6, 0.55, 1.95, 1.3, "Storage dir\nSHA-256 verified\natomic rename\nzone.json (DNS)", "#faf5ff", fs=8)
     arrow((2.2, 5.05), (3.65, 4.6), "frames"); arrow((2.2, 3.5), (3.65, 3.3), "LIST/GET/PUT")
@@ -240,10 +279,18 @@ def screenshots():
         sec = {parts[i]: parts[i + 1] for i in range(1, len(parts), 2)}
         titles = {"server": "Terminal 1 — starting the server", "echo": "Terminal 2 — TCP and UDP echo", "file": "Terminal 2 — file transfer",
                   "dns": "Terminal 2 — DNS service (own client and `dig`)", "concurrency": "Terminal 2 — 20 concurrent clients",
-                  "failure": "Terminal 2 — fault injection", "log": "Server log excerpt (logs/demo.log)"}
+                  "failure": "Terminal 2 — fault injection", "tls": "Terminal 2 — file service over TLS with token authentication",
+                  "log": "Server log excerpt (logs/demo.log)"}
         for k, t in titles.items():
             if k in sec:
                 terminal(sec[k], f"term_{k}.png", t)
+    p = os.path.join(ROOT, "results", "capture_report.txt")
+    if os.path.exists(p):
+        lines = open(p).read().split("\n")
+        terminal("$ sudo ./capture/capture.sh   (tcpdump on lo0, decoded by capture/analyze_pcap.py)\n" + "\n".join(lines[:46]),
+                 "term_capture.png", "Packet capture — packet list", 170)
+        tail = [l for l in lines if l.startswith(("TCP connections", "DNS transactions", "Per protocol", "  "))]
+        terminal("\n".join(tail[:44]), "term_capture_summary.png", "Packet capture — handshakes and DNS transactions", 170)
     p = os.path.join(ROOT, "results", "test_output.txt")
     if os.path.exists(p):
         txt = open(p).read().strip().split("\n")
@@ -252,5 +299,5 @@ def screenshots():
 
 
 if __name__ == "__main__":
-    fig_latency(); fig_concurrency(); fig_files(); fig_dns(); fig_loss(); fig_rto(); fig_resources(); fig_architecture(); screenshots()
+    fig_latency(); fig_concurrency(); fig_files(); fig_dns(); fig_loss(); fig_rto(); fig_eventloop(); fig_delay_rto(); fig_resources(); fig_architecture(); screenshots()
     print("figures written to", FIG)

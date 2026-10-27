@@ -7,3 +7,4 @@ storage/*
 .DS_Store
 copy.txt
 notes.txt
+certs/

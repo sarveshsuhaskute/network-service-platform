@@ -88,8 +88,9 @@ a{color:var(--accent)}
       <div class="row"><div><label>Retries</label><select id="dns-retries"><option>0</option><option>1</option><option selected>2</option><option>4</option></select></div>
       <div><label>Timeout (s)</label><select id="dns-timeout"><option>0.05</option><option selected>0.3</option><option>1</option></select></div></div>
       <label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text)"><input type="checkbox" id="dns-adaptive" style="width:auto"> Adaptive timeout (RFC 6298 RTO, overrides the fixed timeout)</label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:6px;color:var(--text)"><input type="checkbox" id="dns-tcp" style="width:auto"> Query over TCP (port 9053, 2-byte length prefix)</label>
       <button class="go" onclick="dns()">Resolve</button>
-      <div class="hint">Real RFC 1035 packets, authoritative for the <b>campus.lab</b> zone. Unknown names return NXDOMAIN.</div>
+      <div class="hint">Real RFC 1035 packets, authoritative for the <b>campus.lab</b> zone. Unknown names return NXDOMAIN. <b>big.campus.lab</b> (40 records) does not fit in a 512-byte UDP answer: the server sets the TC bit and the client retries over TCP.</div>
     </div>
 
     <div class="pane" id="p-file">
@@ -137,6 +138,8 @@ a{color:var(--accent)}
           <h4>DNS</h4><img src="/figures/fig_dns.png">
           <h4>Packet loss and retransmission</h4><img src="/figures/fig_loss.png">
           <h4>Fixed vs adaptive retransmission timeout</h4><img src="/figures/fig_rto.png">
+          <h4>Adaptive timeout with 20 ± 5 ms emulated RTT</h4><img src="/figures/fig_delay_rto.png">
+          <h4>Thread per connection vs event loop</h4><img src="/figures/fig_eventloop.png">
           <h4>Resource utilisation</h4><img src="/figures/fig_resources.png">
         </div>
       </div>
@@ -162,7 +165,7 @@ document.querySelectorAll('#tabs .tab').forEach(t=>t.onclick=()=>{
   if(t.dataset.p==='file')listFiles();
 });
 function view(v){$('v-live').classList.toggle('active',v==='live');$('v-res').classList.toggle('active',v==='res')}
-['www.campus.lab','web.campus.lab','campus.lab','alias1.campus.lab','mail.campus.lab','nosuchhost.campus.lab'].forEach(n=>{
+['www.campus.lab','web.campus.lab','campus.lab','alias1.campus.lab','big.campus.lab','nosuchhost.campus.lab'].forEach(n=>{
   const c=document.createElement('span');c.className='chip';c.textContent=n;c.onclick=()=>{$('dns-name').value=n;if(n==='campus.lab')$('dns-type').value='MX'};$('dns-chips').appendChild(c)});
 
 function show(r){
@@ -175,7 +178,7 @@ async function post(url,body,raw){
   return r.json();
 }
 async function echo(){show(await post('/api/echo',{text:$('echo-text').value,proto:$('echo-proto').value,retries:$('echo-retries').value}))}
-async function dns(){show(await post('/api/dns',{name:$('dns-name').value,type:$('dns-type').value,retries:$('dns-retries').value,timeout:$('dns-timeout').value,adaptive:$('dns-adaptive').checked}))}
+async function dns(){show(await post('/api/dns',{name:$('dns-name').value,type:$('dns-type').value,retries:$('dns-retries').value,timeout:$('dns-timeout').value,adaptive:$('dns-adaptive').checked,tcp:$('dns-tcp').checked}))}
 async function load(){
   show({cmd:`load test (${$('load-c').value} clients) ... running`,output:'',ok:true});
   show(await post('/api/load',{clients:$('load-c').value,requests:$('load-r').value}))}

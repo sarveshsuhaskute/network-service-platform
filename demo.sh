@@ -39,6 +39,8 @@ cli dns www.campus.lab
 cli dns campus.lab MX
 cli dns nosuchhost.campus.lab
 run dig @127.0.0.1 -p 9053 +noall +comments +answer www.campus.lab
+cli dns big.campus.lab | head -5; echo "   ... (40 A records in total)"; echo
+echo "\$ dig +tcp +short @127.0.0.1 -p 9053 big.campus.lab | wc -l"; dig +tcp +short @127.0.0.1 -p 9053 big.campus.lab | wc -l; echo
 
 echo "### concurrency"
 echo "\$ 20 clients in parallel, each sending 5 echo messages"
@@ -66,10 +68,27 @@ u.sendto(b"\xab\xcd\x01\x00\x00\x05\x00\x00\x00\x00\x00\x00\x03abc", ("127.0.0.1
 PYEOF
 echo
 
+echo "### tls"
+echo "\$ tools/make_cert.sh certs && python3 server.py --file-port 9102 ... --tls-cert certs/server.crt --tls-key certs/server.key --auth-token lab-token"
+tools/make_cert.sh "$DEMO/certs" > /dev/null
+mkdir -p "$DEMO/tls-storage"
+$PY server.py --echo-port 9101 --file-port 9102 --udp-echo-port 9103 --dns-port 9153 --root "$DEMO/tls-storage" \
+  --tls-cert "$DEMO/certs/server.crt" --tls-key "$DEMO/certs/server.key" --auth-token lab-token \
+  --log-file logs/demo.log --stats-interval 0 > /dev/null 2>&1 &
+TLS=$!
+sleep 1
+cp "$DEMO/certs/server.crt" "$DEMO/server.crt"
+cli file --port 9102 --tls --cafile server.crt --token lab-token put notes.txt
+cli file --port 9102 --tls --cafile server.crt --token lab-token list
+cli file --port 9102 --tls --cafile server.crt --token wrong-token list
+cli file --port 9102 --tls --cafile server.crt list
+cli file --port 9102 --tls list
+kill $TLS; wait $TLS 2>/dev/null
+
 echo "### log"
 sleep 0.5
-echo "\$ grep -E 'event=(put|get|list|query|aborted|malformed)|WARNING' logs/demo.log | tail -n 22"
-grep -E 'event=(put|get|list|query|aborted|malformed)|WARNING' logs/demo.log | tail -n 22 | cut -c1-175
+echo "\$ grep -E 'event=(put|get|list|query|aborted|malformed|auth|tls_established|tls_error)|WARNING' logs/demo.log | tail -n 24"
+grep -E 'event=(put|get|list|query|aborted|malformed|auth|tls_established|tls_error)|WARNING' logs/demo.log | tail -n 24 | cut -c1-175
 echo
 
 kill $SRV; wait $SRV 2>/dev/null

@@ -47,7 +47,8 @@ def lat_stats(v):
 
 
 class Server:
-    def __init__(self, tag="bench", **opts):
+    def __init__(self, tag="bench", client_kwargs=None, **opts):
+        self.client_kwargs = client_kwargs or {}
         self.root = tempfile.mkdtemp(prefix="cn-storage-")
         args = [PY, os.path.join(ROOT, "server.py"), "--host", "127.0.0.1", "--echo-port", "0", "--file-port", "0",
                 "--udp-echo-port", "0", "--dns-port", "0", "--root", self.root, "--zone", os.path.join(ROOT, "zone.json"),
@@ -61,7 +62,7 @@ class Server:
         self.ports = json.loads(line[6:])
 
     def stats(self):
-        with cl.FileClient(port=self.ports["file"]) as c:
+        with cl.FileClient(port=self.ports["file"], **self.client_kwargs) as c:
             return c.server_stats()
 
     def rss_mb(self):
@@ -389,6 +390,120 @@ def e10_workers(quick):
     return rows
 
 
+def e11_event_loop(quick):
+    """Thread-per-connection echo vs a single selectors event loop: memory per connection, threads, throughput."""
+    out = {}
+    for io in ("threads", "selectors"):
+        res = {"idle": [], "load": []}
+        for n in ([0, 500] if quick else [0, 500, 1000, 2000]):
+            srv = Server(tag="bench-io", echo_io=io)
+            try:
+                time.sleep(0.3)
+                base = srv.rss_mb()
+                socks = []
+                for i in range(n):
+                    socks.append(socket.create_connection(("127.0.0.1", srv.ports["echo"])))
+                    if i % 10 == 9:
+                        time.sleep(0.003)
+                time.sleep(0.8)
+                st = srv.stats()
+                with cl.EchoClient(port=srv.ports["echo"]) as c:
+                    lat = lat_stats([c.echo(b"p" * 64)[1] for _ in range(300)])
+                rss = srv.rss_mb()
+                res["idle"].append({"idle_connections": n, "rss_mb": rss, "threads": st["threads"],
+                                    "kb_per_conn": (rss - base) * 1024 / n if n else 0, "echo_p50_ms": lat["p50_ms"]})
+                for s_ in socks:
+                    s_.close()
+            finally:
+                srv.stop()
+        srv = Server(tag="bench-io", echo_io=io)
+        try:
+            for c in ([1, 50] if quick else [1, 10, 50, 200]):
+                r, rs = srv.measure(lambda: load("echo", srv.ports["echo"], c, 100 if quick else 300, 1024))
+                r.update(rs)
+                res["load"].append(r)
+        finally:
+            srv.stop()
+        out[io] = res
+        print(f"  {io}: idle " + ", ".join(f"{x['idle_connections']}->{x['rss_mb']:.0f}MB/{x['threads']}thr" for x in res["idle"])
+              + " | load " + ", ".join(f"{x['clients']}c {x['req_per_s']:,.0f}/s p95={x['p95_ms']:.2f} cpu={x['cpu_pct']:.0f}%" for x in res["load"]),
+              flush=True)
+    return out
+
+
+def e12_tls(quick):
+    """Cost of TLS on the file service: connection set-up latency and bulk throughput."""
+    certdir = tempfile.mkdtemp(prefix="cn-cert-")
+    subprocess.run([os.path.join(ROOT, "tools", "make_cert.sh"), certdir], check=True, capture_output=True)
+    cert, key = os.path.join(certdir, "server.crt"), os.path.join(certdir, "server.key")
+    d = tempfile.mkdtemp(prefix="cn-client-")
+    src = os.path.join(d, "f.bin")
+    mb = 20 if quick else 100
+    with open(src, "wb") as f:
+        for _ in range(mb):
+            f.write(os.urandom(1024 * 1024))
+    out = {}
+    for mode in ("plain", "tls"):
+        ck = {"tls": True, "cafile": cert} if mode == "tls" else {}
+        opts = {"tls_cert": cert, "tls_key": key} if mode == "tls" else {}
+        srv = Server(tag="bench-tls", client_kwargs=ck, digest_cache="on", **opts)
+        try:
+            setup = []
+            for _ in range(50 if quick else 300):
+                t0 = time.perf_counter()
+                with cl.FileClient(port=srv.ports["file"], **ck) as c:
+                    c.ping()
+                setup.append(time.perf_counter() - t0)
+            up, down = [], []
+
+            def transfer():
+                with cl.FileClient(port=srv.ports["file"], timeout=120, **ck) as c:
+                    for _ in range(3):
+                        n, t = c.put(src, "f.bin"); up.append(n / t / 1e6)
+                        n, t = c.get("f.bin", os.path.join(d, "dl.bin")); down.append(n / t / 1e6)
+            _, rs = srv.measure(transfer)
+            out[mode] = {"connect_ping": lat_stats(setup), "upload_MBps": statistics.fmean(up),
+                         "download_MBps": statistics.fmean(down), "cpu_pct": rs["cpu_pct"], "size_mb": mb}
+            print(f"  {mode}: connect+PING p50={out[mode]['connect_ping']['p50_ms']:.3f} ms  up={out[mode]['upload_MBps']:.0f} MB/s "
+                  f"down={out[mode]['download_MBps']:.0f} MB/s cpu={rs['cpu_pct']:.0f}%", flush=True)
+        finally:
+            srv.stop()
+    return out
+
+
+def e13_delay_rto(quick):
+    """20 +/- 5 ms emulated RTT: fixed 50 ms, fixed 20 ms (too aggressive) and adaptive RTO, 4 retries."""
+    N = 80 if quick else 200
+    rows = []
+    for p in [0.0, 0.1, 0.2, 0.3]:
+        row = {"loss_per_datagram": p}
+        for mode in ("fixed50", "fixed20", "adaptive"):
+            srv = Server(tag="bench-delay", loss=p, seed=31, delay_ms=20, jitter_ms=5)
+            try:
+                est = cl.RTTEstimator(initial=0.2) if mode == "adaptive" else None
+                to = {"fixed50": 0.05, "fixed20": 0.02, "adaptive": 0.2}[mode]
+                before = srv.stats()["counters"].get("dns.datagrams_in", 0)
+                ok, times = 0, []
+                for _ in range(N):
+                    try:
+                        _, secs, _a = cl.dns_query("127.0.0.1", srv.ports["dns"], "web.campus.lab", timeout=to,
+                                                   retries=4, estimator=est)
+                        ok += 1; times.append(secs * 1000)
+                    except socket.timeout:
+                        pass
+                sent = srv.stats()["counters"].get("dns.datagrams_in", 0) - before
+                row[mode] = {"success": ok / N, "mean_ms": statistics.fmean(times) if times else None,
+                             "p95_ms": pct(times, 95) if times else None, "datagrams_per_query": sent / N,
+                             "final_rto_ms": est.rto() * 1000 if est else to * 1000}
+            finally:
+                srv.stop()
+        rows.append(row)
+        print(f"  loss={p:.1f} " + " | ".join(f"{m}: succ={row[m]['success']:.3f} mean={row[m]['mean_ms']:.1f}ms "
+                                                f"dgram/q={row[m]['datagrams_per_query']:.2f} rto={row[m]['final_rto_ms']:.1f}"
+                                                for m in ("fixed50", "fixed20", "adaptive")), flush=True)
+    return {"queries": N, "delay_ms": 20, "jitter_ms": 5, "rows": rows}
+
+
 def e6_idle_connections(quick):
     rows = []
     for n in ([0, 100, 400] if quick else [0, 100, 250, 500, 1000, 2000]):
@@ -466,7 +581,7 @@ def e7_failure_detection():
         t0 = time.perf_counter()
         try:
             cl.tcp_connect("127.0.0.1", srv.ports["echo"], timeout=0.5, retries=2, backoff=0.2)
-        except ConnectionError as e:
+        except ConnectionError:
             out["connect_refused"] = {"exception": "ConnectionError", "detected_after_s": time.perf_counter() - t0, "attempts": 3}
         t0 = time.perf_counter()
         try:
@@ -548,6 +663,9 @@ def main():
     run("e5", "packet loss, retransmission and reliability", e5_loss, server=False)
     run("e9", "adaptive vs fixed retransmission timeout", e9_adaptive_rto, server=False)
     run("e10", "pre-forked worker processes", e10_workers, server=False)
+    run("e11", "threads vs event loop", e11_event_loop, server=False)
+    run("e12", "TLS cost", e12_tls, server=False)
+    run("e13", "adaptive RTO under emulated delay", e13_delay_rto, server=False)
     run("e6", "resource use with many idle connections", e6_idle_connections, server=False)
     run("e6b", "burst connection limit", e6b_burst_limit, server=False)
     run("e7", "failure detection", e7_failure_detection, server=False)

@@ -119,7 +119,7 @@ def table(headers, rows, widths=None, cap=None, size=9.5, align_num=True, header
         counters["tab"] += 1
         if label:
             REF[label] = f"Table {counters['tab']}"
-        p = P(f"**Table {counters['tab']}:** {cap}", align="center", size=10.5, after=3, keep=True)
+        P(f"**Table {counters['tab']}:** {cap}", align="center", size=10.5, after=3, keep=True)
     if widths and sum(widths) > USABLE:
         widths = [w * USABLE / sum(widths) for w in widths]
     t = doc.add_table(rows=1, cols=len(headers))
@@ -202,6 +202,14 @@ E4L, E4Q = R["e4"]["latency"], R["e4"]["qps"]
 E5, E6, E6B, E7 = R["e5"], R["e6"], R["e6b"], R["e7"]
 E9 = R["e9"]
 E10 = R["e10"]
+E11, E12, E13 = R["e11"], R["e12"], R["e13"]
+CAP = json.load(open(os.path.join(ROOT, "results", "capture_analysis.json"))) if os.path.exists(os.path.join(ROOT, "results", "capture_analysis.json")) else None
+EL_T = {x["idle_connections"]: x for x in E11["threads"]["idle"]}
+EL_S = {x["idle_connections"]: x for x in E11["selectors"]["idle"]}
+LD_T = {x["clients"]: x for x in E11["threads"]["load"]}
+LD_S = {x["clients"]: x for x in E11["selectors"]["load"]}
+def us_per_req(x): return x["cpu_s"] / max(x["requests"], 1) * 1e6
+D13 = {r["loss_per_datagram"]: r for r in E13["rows"]}
 W1, W6 = E10[0], E10[-1]
 RTO40 = [r for r in E9["rows"] if r["loss_per_datagram"] == 0.4][0]
 RTO_SPEEDUP = [r["fixed"]["mean_ms"] / r["adaptive"]["mean_ms"] for r in E9["rows"] if r["loss_per_datagram"] > 0]
@@ -334,6 +342,9 @@ bullets([
     "**Detect communication failures** (crashed or hung peers, idle clients, truncated transfers, malformed packets, lost datagrams) and handle each with an appropriate error response or recovery action.",
     "**Evaluate** the platform on response time, throughput, reliability, packet loss and resource utilisation, using repeatable experiments.",
     "Go beyond measurement: identify bottlenecks, implement optimisations and quantify their effect.",
+    "Extend the platform the way production services are extended – DNS over TCP for large answers, TLS and authentication for file transfer, an event-loop "
+    "server for many idle clients – and measure what each extension costs or gains.",
+    "Verify the behaviour at packet level with a tcpdump capture decoded layer by layer.",
 ])
 
 # =============================================================================== 4 Literature
@@ -361,14 +372,14 @@ P("**Gap addressed.** Reference implementations are either too large to read in 
 
 # =============================================================================== 5 Abstract
 H1("5. Abstract of the Proposed Project Work")
-P(f"The project delivers a client–server platform in which one server process offers four services: a TCP echo service with "
-  f"length-prefixed framing, a UDP echo service, a TCP file-transfer service with SHA-256 integrity verification in both directions "
-  f"and atomic stores, and an authoritative UDP DNS service that implements RFC 1035 message encoding and decoding and interoperates with "
-  f"the standard `dig` tool. TCP services use one thread per connection with idle timeouts and a client cap; UDP services use a "
-  f"receive loop and a worker pool. All services write a structured log and update shared counters that clients can query "
-  f"at run time. The server detects timeouts, resets, truncated messages, oversize frames, malformed DNS packets, bad file names and "
-  f"checksum mismatches, and recovers from each without affecting other clients. The client library adds bounded connect retries with "
-  f"exponential back-off and UDP retransmission with per-attempt timeouts.")
+P("The project delivers a client–server platform in which one server process offers four services: a TCP echo service with "
+  "length-prefixed framing, a UDP echo service, a TCP file-transfer service with SHA-256 integrity verification in both directions "
+  "and atomic stores, and an authoritative UDP DNS service that implements RFC 1035 message encoding and decoding and interoperates with "
+  "the standard `dig` tool. TCP services use one thread per connection with idle timeouts and a client cap; UDP services use a "
+  "receive loop and a worker pool. All services write a structured log and update shared counters that clients can query "
+  "at run time. The server detects timeouts, resets, truncated messages, oversize frames, malformed DNS packets, bad file names and "
+  "checksum mismatches, and recovers from each without affecting other clients. The client library adds bounded connect retries with "
+  "exponential back-off and UDP retransmission with per-attempt timeouts.")
 P(f"Evaluation on an {M['cpu']} machine ({M['cores']} cores, {M['ram_gb']:.0f} GB) over the loopback interface shows: TCP echo "
   f"round-trip times of {f3(tcp1k['p50_ms'])} ms (1 KiB, median); a sustained {f0(sum(plateau) / len(plateau))} echo requests per second "
   f"(peak {f0(peak['req_per_s'])}) with 0 errors for 1 to 400 concurrent clients; file transfers at about {f1(up100 / 1000)} GB/s; "
@@ -377,7 +388,10 @@ P(f"Evaluation on an {M['cpu']} machine ({M['cores']} cores, {M['ram_gb']:.0f} G
   f"{pc(dns_at(loss20, 2)['success'])} at 20% per-datagram loss; and {f1(idle2000['kb_per_conn'])} KB of memory per open connection. "
   f"A digest cache raised single-client download throughput from {f1(dl_base100 / 1000)} to {f1(dl_dc100 / 1000)} GB/s, and combined with "
   f"`sendfile()` it cut server CPU at 8 concurrent downloads from {f0(c8[0]['cpu_pct'])}% to {f0(c8[3]['cpu_pct'])}%. An adaptive, RFC 6298-style retransmission timer cut "
-  f"the response time of lossy DNS queries by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× at the same success rate. The suite of "
+  f"the response time of lossy DNS queries by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× at the same success rate. A single-threaded "
+  f"`selectors` event loop held 2,000 idle connections in {f0(EL_S[2000]['rss_mb'])} MB instead of {f0(EL_T[2000]['rss_mb'])} MB and served "
+  f"{f0(LD_S[200]['req_per_s'])} instead of {f0(LD_T[200]['req_per_s'])} req/s at 200 clients. DNS also runs over TCP with automatic fallback for "
+  f"truncated answers, and the file service supports TLS 1.3 with token authentication. The suite of "
   f"{T['total']} automated tests ({tests_pass} passing) covers functional, fault-injection and security cases.")
 
 # =============================================================================== 6 Workflow / architecture
@@ -385,10 +399,11 @@ H1("6. Workflow of the Proposed Project Work / System Design / System Architectu
 H2("6.1 Architecture")
 figure("fig_architecture.png", 6.1, "System architecture: four services in one server process, shared logging, statistics and failure handling")
 table(["Service", "Transport / port", "Request → response", "Concurrency model", "Reliability mechanism"],
-      [["Echo", "TCP 9001", "`[len:4][payload]` → same frame", "1 thread per connection", "TCP + frame length check; idle timeout"],
-       ["File", "TCP 9002", "text command line (+ binary body) → `OK`/`ERR` line (+ body)", "1 thread per connection", "SHA-256 end to end; atomic rename; abort cleanup"],
+      [["Echo", "TCP 9001", "`[len:4][payload]` → same frame", "1 thread per connection, or one `selectors` event loop (`--echo-io`)", "TCP + frame length check; idle timeout"],
+       ["File", "TCP 9002 (optionally TLS)", "text command line (+ binary body) → `OK`/`ERR` line (+ body); `AUTH <token>` when enabled", "1 thread per connection", "SHA-256 end to end; atomic rename; abort cleanup; TLS 1.2+"],
        ["UDP echo", "UDP 9003", "datagram → same datagram", "receive loop + 16 workers", "client timeout and retransmission"],
-       ["DNS", "UDP 9053", "RFC 1035 query → response (rcode, answers)", "receive loop + 16 workers", "client timeout, retransmission, same transaction ID"]],
+       ["DNS", "UDP 9053", "RFC 1035 query → response (rcode, answers)", "receive loop + 16 workers", "client timeout, retransmission, same transaction ID"],
+       ["DNS over TCP", "TCP 9053", "`[len:2][DNS message]`, several per connection (RFC 7766)", "1 thread per connection", "TCP; used automatically when a UDP answer has TC = 1"]],
       widths=[0.7, 0.9, 1.9, 1.3, 1.6], cap="Service summary", size=9)
 H2("6.2 Request workflows")
 P("**TCP echo.** (1) Client connects (bounded retries with exponential back-off). (2) Client sends a 4-byte big-endian length followed by the "
@@ -403,7 +418,13 @@ P("**File upload (PUT).** (1) Server validates the name against `^[A-Za-z0-9_][A
 P("**DNS query.** (1) Client builds a query with a fresh transaction ID and sends it. (2) If no matching reply arrives within the timeout it "
   "retransmits the *same* packet, up to the retry budget; replies with a different ID are ignored. (3) The server parses the header and question "
   "(rejecting compression loops, truncated names and QDCOUNT≠1 with FORMERR), looks the name up case-insensitively, follows CNAME chains up to "
-  "8 hops, and answers NOERROR (with or without data) or NXDOMAIN; unknown names can optionally be forwarded to an upstream resolver and cached.")
+  "8 hops, and answers NOERROR (with or without data) or NXDOMAIN; unknown names can optionally be forwarded to an upstream resolver and cached. "
+  "(4) If the answer does not fit in 512 bytes the server sets the TC bit and sends no records; the client then repeats the query over TCP on the same "
+  "port number, where each message is preceded by a 2-byte length and the full answer is returned [15].")
+P("**Secure file session.** With `--tls-cert/--tls-key` the file service wraps each accepted connection in TLS (minimum TLS 1.2, TLS 1.3 negotiated in "
+  "practice) inside that connection’s own thread, so a slow handshake never blocks other clients [16]. The client verifies the server certificate against a "
+  "supplied CA file. With `--auth-token`, every command except `PING`/`QUIT` returns `ERR 401` until `AUTH <token>` succeeds; the token is compared in constant "
+  "time (`hmac.compare_digest`) and three wrong tokens close the connection.")
 H2("6.3 Failure-handling design")
 table(["Failure", "Detected by", "Server action", "Client action"],
       [["Client crashes / disconnects mid-message", "`recv` returns 0 with a partial message", "Log `aborted`, delete temp file, free slot", "—"],
@@ -417,12 +438,16 @@ table(["Failure", "Detected by", "Server action", "Client action"],
        ["Path traversal, bad names", "Whitelist regular expression", "`ERR 400`, session continues", "`ServiceError`"],
        ["Corrupted upload/download", "SHA-256 mismatch", "`ERR 422`, data discarded", "`ProtocolError`"],
        ["Malformed DNS packet", "Parser raises `DNSFormatError`", "FORMERR reply (or drop if no ID), log `malformed`", "rcode shown"],
-       ["Lost UDP datagram", "Client timeout", "—", "Retransmit up to the retry budget, then `socket.timeout`"]],
+       ["Lost UDP datagram", "Client timeout", "—", "Retransmit up to the retry budget, then `socket.timeout`"],
+       ["DNS answer > 512 bytes", "Message size check", "TC = 1, answers dropped", "Repeat the query over TCP"],
+       ["TLS handshake failure / plaintext client", "`ssl.SSLError` in the handshake", "Log `tls_error`, close", "`SSLError` / certificate verification error"],
+       ["Missing or wrong token", "`AUTH` check (constant time)", "`ERR 401`; close after 3 failures", "`ServiceError`"]],
       widths=[1.55, 1.6, 1.7, 1.55], cap="Failure scenarios and handling", size=9)
 H2("6.4 Concurrency and logging design")
 P("For each TCP service an *accept thread* only calls `accept()` and enqueues the socket, so the kernel listen queue drains as fast as "
   "possible; a *dispatcher thread* then acquires a slot from a bounded semaphore (`--max-clients`) and starts one handler thread per connection. "
-  "For UDP, a *receive thread* reads datagrams and hands them to a `ThreadPoolExecutor`. A single `Stats` object (lock-protected counters) is "
+  "The echo service can instead run on a single `selectors` event loop (kqueue on macOS, epoll on Linux) that multiplexes every socket from one thread "
+  "with per-connection input/output buffers and back-pressure [11], [18]; Section 9.e compares the two models. For UDP, a *receive thread* reads datagrams and hands them to a `ThreadPoolExecutor`. A single `Stats` object (lock-protected counters) is "
   "shared by all services and can be read remotely with the `STATS` command. Logging uses one `key=value` line per event "
   "(`svc=file client=127.0.0.1:55635 event=aborted detail=...`), written to a rotating file and to stderr, which makes the logs easy to grep and parse.")
 
@@ -438,15 +463,20 @@ H1("8. Modules Explanation")
 table(["Module (file)", "Responsibility", "Key design points"],
       [["`protocol.py`", "Framing helpers shared by TCP services", "`recv_exact` loops until n bytes arrive and distinguishes a clean close from a mid-message close (`ConnectionClosed.partial`); 16 MiB frame cap; `sha256_file`"],
        ["`dns_wire.py`", "RFC 1035 encoder/decoder", "Label encoding, compression-pointer decoding with loop limit, A/AAAA/CNAME/MX/TXT RDATA, header flags (AA, TC, RD, RA, rcode), 512-byte UDP limit with TC bit"],
-       ["`server.py` – `Stats`, `Session`", "Counters, per-connection accounting", "Thread-safe counters, active/peak connections, `getrusage` CPU and peak RSS"],
-       ["`server.py` – `TCPService`", "Accept/dispatch/serve lifecycle for TCP services", "Accept queue decoupled from thread start, semaphore-bounded clients, idle timeout, TCP keep-alive, uniform exception → log mapping"],
-       ["`server.py` – `EchoService`", "TCP echo", "Frame in, same frame out"],
-       ["`server.py` – `FileService`", "File transfer", "LIST/GET/PUT/STAT/STATS/PING/QUIT; name whitelist; size limit; temp-file + atomic rename; SHA-256 digest cache; chunked or `sendfile` sending"],
-       ["`server.py` – `UDPService`, `UDPEchoService`", "UDP receive loop and worker pool", "Per-datagram simulated loss (`--loss`) applied on receive and on send"],
-       ["`server.py` – `Zone`, `DNSService`", "Authoritative DNS", "JSON zone, case-insensitive lookup, CNAME chasing, NXDOMAIN/NODATA, FORMERR/NOTIMP/REFUSED, optional forwarding with TTL cache"],
-       ["`client.py`", "Client library and CLI", "`tcp_connect` (retry + back-off), `EchoClient`, `FileClient` (verified GET/PUT), `udp_request` (retransmit, ID matching), `RTTEstimator` (adaptive RTO), `dns_query`"],
+       ["`server.py`", "Entry point and `Platform`", "Builds and starts all services, command-line options, pre-fork workers, signal handling"],
+       ["`core.py` – `Stats`, `Session`", "Counters, per-connection accounting, logging", "Thread-safe counters, active/peak connections, `getrusage` CPU and peak RSS, rotating key=value log"],
+       ["`tcp_services.py` – `TCPService`", "Accept/dispatch/serve lifecycle for TCP services", "Accept queue decoupled from thread start, semaphore-bounded clients, idle timeout, TCP keep-alive, optional TLS wrap, uniform exception → log mapping"],
+       ["`tcp_services.py` – `EchoService`, `EventLoopEchoService`", "TCP echo (two concurrency models)", "Thread per connection, or one `selectors` loop with buffers, idle sweep and back-pressure"],
+       ["`tcp_services.py` – `FileService`", "File transfer", "LIST/GET/PUT/STAT/STATS/PING/QUIT/AUTH; name whitelist; size limit; temp-file + atomic rename; SHA-256 digest cache; chunked or `sendfile` sending"],
+       ["`tcp_services.py` – `DNSTCPService`", "DNS over TCP", "2-byte length framing, pipelined queries, shares the resolver with the UDP service"],
+       ["`udp_services.py` – `UDPService`, `UDPEchoService`", "UDP receive loop and worker pool", "Simulated loss (`--loss`) and delay/jitter (`--delay-ms`, a timer queue, not sleeping workers)"],
+       ["`udp_services.py` – `Zone`, `DNSService`", "Authoritative DNS", "JSON zone, case-insensitive lookup, CNAME chasing, NXDOMAIN/NODATA, TC on oversize answers, FORMERR/NOTIMP/REFUSED, forwarding with TTL cache"],
+       ["`client.py`", "Client library and CLI", "`tcp_connect` (retry + back-off), `EchoClient`, `FileClient` (verified GET/PUT), `udp_request` (retransmit, ID matching), `RTTEstimator` (adaptive RTO), `dns_query` with TCP fallback, `dns_query_tcp`, TLS + token"],
        ["`tests/`", f"{T['total']} automated tests", "Functional, concurrency, fault injection, security; `run_tests.py` records results as JSON"],
-       ["`bench/run_benchmarks.py`", "Evaluation harness", "Launches the server as a separate process, multi-process load generators, RSS sampling, CPU from `getrusage` deltas"]],
+       ["`bench/run_benchmarks.py`", "Evaluation harness", "Launches the server as a separate process, multi-process load generators, RSS sampling, CPU from `getrusage` deltas"],
+       ["`capture/`", "Packet-level evidence", "`capture.sh` records every service with tcpdump; `analyze_pcap.py` decodes pcap → IPv4 → TCP/UDP → DNS without third-party libraries"],
+       ["`web.py`, `web/`", "Browser dashboard", "Runs the platform and exposes every client action, live log and statistics"],
+       ["`tools/make_cert.sh`", "Certificates", "Self-signed P-256 certificate for localhost / 127.0.0.1"]],
       widths=[1.55, 1.5, 3.35], cap="Module overview", size=9)
 H2("8.1 Protocol specifications")
 table(["Command / frame", "Format", "Success reply", "Errors"],
@@ -458,6 +488,8 @@ table(["Command / frame", "Format", "Success reply", "Errors"],
        ["`PUT name size sha`", "`PUT a.bin 1000 <64 hex>\\n` + bytes after `READY`", "`READY`, then `OK <size>`", "`400`, `413` too large, `422` checksum"],
        ["`STATS`", "`STATS\\n`", "`OK <n>\\n` + JSON counters", "—"],
        ["`QUIT`", "`QUIT\\n`", "`OK bye`", "—"],
+       ["`AUTH token`", "`AUTH s3cret\\n` (only when `--auth-token` is set)", "`OK authenticated`", "`401`; connection closed after 3 failures"],
+       ["DNS over TCP", "`len:uint16 BE` + DNS message, repeated", "`len:uint16 BE` + DNS response", "malformed → FORMERR"],
        ["Any unknown", "—", "—", "`ERR 400 unknown or malformed command`; line > 1 KiB closes"],
        ["Busy", "—", "—", "`ERR 503 server busy` then close"]],
       widths=[1.2, 2.3, 1.6, 1.3], cap="TCP application protocols", size=9)
@@ -471,9 +503,9 @@ table(["Item", "Specification"],
        ["Language / runtime", f"Python {M['python']} (standard library only for the platform, tests and benchmarks)"],
        ["Report tooling", "matplotlib (figures), python-docx (this document)"],
        ["Network", "Loopback interface (127.0.0.1): server, clients and load generators are separate processes on one host"],
-       ["External tool for interoperability check", "`dig` (BIND utilities) as an independent DNS client"],
+       ["External tools", "`dig` (BIND utilities) as an independent DNS client; `openssl` for the test certificate; `tcpdump` for packet capture"],
        ["Kernel settings observed", f"`kern.ipc.somaxconn` = {E6B['somaxconn']}; file-descriptor soft limit raised by the server to 8192"],
-       ["Minimum requirements to run", "Any OS with Python 3.9+; ≈30 MB RAM + ≈54 KB per open connection; no third-party packages"]],
+       ["Minimum requirements to run", f"Any OS with Python 3.9+; ≈{f0(idle0['rss_mb'])} MB RAM + ≈{f0(idle2000['kb_per_conn'])} KB per open connection (threaded mode); no third-party packages"]],
       widths=[2.0, 4.4], cap="Experimental setup", size=10)
 P("**Methodology.** Each experiment starts a fresh server process (`bench/run_benchmarks.py`) so that results are independent. "
   "Latencies are measured on the client with `time.perf_counter()` around one request/response. Load generators run in four "
@@ -503,7 +535,28 @@ figure("term_dns.png", 5.8, "DNS service queried with the project client and wit
 figure("term_concurrency.png", 4.4, "Twenty parallel clients and the live server statistics returned by the `STATS` command")
 figure("term_failure.png", 5.4, "Fault injection: aborted upload, path traversal and malformed DNS packet (FORMERR, rcode 1)")
 figure("term_log.png", 6.2, "Server log excerpt: uploads, downloads, DNS queries with microsecond service times, a WARNING for the aborted upload and for the malformed packet")
+figure("term_tls.png", 5.8, "File service over TLS 1.3 with token authentication: valid token, wrong token, no token, and an untrusted certificate")
 figure("term_tests.png", 6.3, f"Automated test-suite output ({tests_pass}/{T['total']} passing)")
+if CAP:
+    H3("Packet-level evidence (tcpdump capture)")
+    hs = CAP["handshakes"]
+    tx = CAP["dns_transactions"]
+    retx = [t for t in tx if t["retransmissions"]]
+    trunc = [t for t in tx if t["truncated"]]
+    P(f"`capture/capture.sh` recorded every service on the loopback interface with tcpdump [17] while a scripted client session ran, and "
+      f"`capture/analyze_pcap.py` decoded the {len(CAP['packets'])} packets layer by layer (pcap → IPv4 → TCP/UDP → DNS). The capture file "
+      f"`results/capture.pcap` also opens in Wireshark. It shows {len(hs)} TCP connections, each opened with SYN → SYN,ACK → ACK, "
+      f"{len(tx)} DNS transactions, {len(retx)} of them with retransmitted queries (the same transaction ID sent again after the timeout), and "
+      f"{len(trunc)} truncated UDP answer(s) followed by the same query over TCP.")
+    figure("term_capture.png", 6.3, "Decoded packet list from the tcpdump capture (Wireshark-style)")
+    figure("term_capture_summary.png", 6.3, "Handshakes, DNS transactions and retransmission gaps extracted from the capture")
+    table(["Service", "SYN #", "SYN,ACK #", "ACK #", "Handshake (ms)", "Data packets", "FIN", "RST"],
+          [[h["service"], h["syn_no"], h["synack_no"], h["ack_no"] or "—", f3(h["handshake_ms"]), h["data_packets"], h["fin_packets"], h["rst_packets"]] for h in hs],
+          widths=[0.9, 0.6, 0.8, 0.6, 1.0, 0.9, 0.5, 0.5], cap="TCP three-way handshakes and teardowns observed on the wire", size=9, label="cap_hs")
+    if retx:
+        table(["Query ID", "Question", "Times sent", "Gaps between sends (ms)", "Answered"],
+              [[f"0x{t['id']:04x}", t["queries"][0]["info"].split(" ", 3)[-1], len(t["queries"]), ", ".join(str(g) for g in t["gaps_ms"]), "yes" if t["answered"] else "no"] for t in retx],
+              widths=[0.8, 2.2, 0.8, 1.6, 0.8], cap="DNS retransmissions seen on the wire under 40% simulated loss (client timeout 200 ms)", size=9, label="cap_retx")
 
 H2("d. Performance Analysis – Comparison of Methods / Protocols")
 H3("d.1 Response time versus message size (TCP versus UDP)")
@@ -588,6 +641,18 @@ table(["Criterion", "TCP services (echo, file)", "UDP services (echo, DNS)", "Ev
        ["Failure detection", "Immediate on close/reset; timeout if hung", "Only timeouts", REF["fail_det"]]],
       widths=[1.2, 1.7, 1.7, 1.8], cap="TCP versus UDP in this platform", size=9)
 
+H3("d.9 Security: the cost of TLS")
+P12, T12 = E12["plain"], E12["tls"]
+table(["File service", "Connect + PING p50 (ms)", "p95 (ms)", f"Upload {T12['size_mb']} MB (MB/s)", f"Download {T12['size_mb']} MB (MB/s)", "Server CPU (%)"],
+      [["Plain TCP", f3(P12["connect_ping"]["p50_ms"]), f3(P12["connect_ping"]["p95_ms"]), f0(P12["upload_MBps"]), f0(P12["download_MBps"]), f0(P12["cpu_pct"])],
+       ["TLS 1.3", f3(T12["connect_ping"]["p50_ms"]), f3(T12["connect_ping"]["p95_ms"]), f0(T12["upload_MBps"]), f0(T12["download_MBps"]), f0(T12["cpu_pct"])]],
+      widths=[1.0, 1.1, 0.7, 1.1, 1.2, 0.9], cap="Plain versus TLS file service (300 connections; 3 transfers each way)", size=9.5, label="tls")
+P(f"TLS adds about {T12['connect_ping']['p50_ms'] - P12['connect_ping']['p50_ms']:.2f} ms to every new connection "
+  f"({T12['connect_ping']['p50_ms'] / P12['connect_ping']['p50_ms']:.1f}× the plain set-up time) because of the handshake and certificate verification, and "
+  f"reduces bulk throughput by {(1 - T12['upload_MBps'] / P12['upload_MBps']) * 100:.0f}% (upload) and {(1 - T12['download_MBps'] / P12['download_MBps']) * 100:.0f}% (download) "
+  f"because every byte is encrypted and authenticated (AES-GCM or ChaCha20-Poly1305) and `sendfile()` can no longer bypass user space. On a real network, where "
+  f"round-trip times are milliseconds and links are slower than 1 GB/s, both costs shrink relative to the network itself; long-lived connections amortise the handshake.")
+
 H2("e. Critical Evaluation / Optimization")
 P("This section records what the measurements revealed as weaknesses, what was changed in response, and what remains.")
 P(f"**Finding and mitigation 1 – connection bursts and the accept path.** The first full benchmark lost one of 400 clients (50 requests) and a test that opened 500 idle "
@@ -629,9 +694,25 @@ P(f"The success rate is identical in every row, which confirms that reliability 
   f"falls by {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}×. On loopback the learned RTO sits at the 5 ms floor, so the floor (not the RTT) now dominates; on a real network with "
   f"tens of milliseconds of RTT the estimator would track the path instead. The trade-off is that a too-small floor causes spurious retransmissions on a path whose delay suddenly rises, "
   f"which is why RFC 6298 recommends a conservative minimum on the open Internet.")
-P(f"**Optimisation 4 – pre-forked worker processes.** To get past the one-core limit, `server.py --workers N` binds every socket once and then forks N−1 copies "
-  f"before any thread starts; all processes inherit the same listening sockets and the kernel hands each new connection or datagram to whichever process is waiting "
-  f"(the classic pre-fork model used by Apache and gunicorn). Each process has its own interpreter and GIL.")
+P(f"To test the estimator on a path where the floor does not dominate, the UDP services were given an emulated round-trip delay of "
+  f"{E13['delay_ms']} ± {E13['jitter_ms']} ms (`--delay-ms`, `--jitter-ms`), and three policies were compared ({E13['queries']} queries per cell, 4 retries):")
+table(["Loss p", "Policy", "Success", "Mean (ms)", "p95 (ms)", "Datagrams / query", "Timeout used (ms)"],
+      [[pc(p_), lab, pc(D13[p_][m]["success"]), f1(D13[p_][m]["mean_ms"]), f1(D13[p_][m]["p95_ms"]), f"{D13[p_][m]['datagrams_per_query']:.2f}", f1(D13[p_][m]["final_rto_ms"])]
+       for p_ in sorted(D13) for m, lab in (("fixed50", "fixed 50 ms"), ("fixed20", "fixed 20 ms"), ("adaptive", "adaptive RTO"))],
+      widths=[0.6, 1.1, 0.7, 0.8, 0.8, 1.1, 1.1], cap=f"Retransmission policies with {E13['delay_ms']} ± {E13['jitter_ms']} ms emulated RTT", size=8.5, label="delay_rto")
+figure("fig_delay_rto.png", 6.2, "Response time and datagrams sent per query for three timeout policies with emulated delay", label="fig_delay_rto")
+P(f"The estimator learned an RTO of {f1(D13[0.0]['adaptive']['final_rto_ms'])} ms – above the 15–25 ms RTT, as intended – and with no loss it sent exactly "
+  f"{D13[0.0]['adaptive']['datagrams_per_query']:.2f} datagram per query. A fixed 20 ms timeout, shorter than some round trips, fired before the reply arrived and sent "
+  f"{D13[0.0]['fixed20']['datagrams_per_query']:.2f} datagrams per query with **zero loss**: {(D13[0.0]['fixed20']['datagrams_per_query'] - 1) * 100:.0f}% spurious retransmissions. "
+  f"Under loss the picture reverses: exponential back-off doubles the adaptive timeout after each loss, so at 30% loss its mean response "
+  f"({f1(D13[0.3]['adaptive']['mean_ms'])} ms) is slower than a fixed 50 ms timeout ({f1(D13[0.3]['fixed50']['mean_ms'])} ms), and the aggressive 20 ms timeout is fastest "
+  f"({f1(D13[0.3]['fixed20']['mean_ms'])} ms) but sends {D13[0.3]['fixed20']['datagrams_per_query']:.2f} datagrams per query instead of {D13[0.3]['adaptive']['datagrams_per_query']:.2f}. "
+  f"This is the trade-off RFC 6298 and RFC 8085 make on purpose [3], [12]: on a shared network, loss usually signals congestion, and backing off reduces the load that caused it; "
+  f"a sender that keeps retransmitting quickly gets lower latency for itself by adding up to {(D13[0.3]['fixed20']['datagrams_per_query'] / D13[0.3]['adaptive']['datagrams_per_query'] - 1) * 100:.0f}% more traffic. "
+  f"Random, non-congestive loss (as simulated here) is the case where back-off costs latency for no benefit.")
+P("**Optimisation 4 – pre-forked worker processes.** To get past the one-core limit, `server.py --workers N` binds every socket once and then forks N−1 copies "
+  "before any thread starts; all processes inherit the same listening sockets and the kernel hands each new connection or datagram to whichever process is waiting "
+  "(the classic pre-fork model used by Apache and gunicorn). Each process has its own interpreter and GIL.")
 rows = []
 for r in E10:
     rows.append([r["workers"], f0(r["echo_50"]["req_per_s"]), f2(r["echo_50"]["p95_ms"]), f0(r["echo_200"]["req_per_s"]), f2(r["echo_200"]["p95_ms"]),
@@ -646,6 +727,27 @@ P(f"TCP echo throughput rises from {f0(W1['echo_50']['req_per_s'])} to {f0(W6['e
   f"processes (the thundering-herd problem) and work bounces between them, while UDP has no connection to keep a client on one worker. The right design for UDP is one socket per worker "
   f"with kernel load-balancing (`SO_REUSEPORT` on Linux), which macOS does not provide for this case. The lesson is that the same scaling technique helps a connection-oriented service "
   f"and hurts a datagram service, so the platform keeps `--workers 1` as the default and documents `--workers N` for TCP-heavy loads. Server statistics are per process in this mode.")
+P(f"**Optimisation 5 – event loop instead of thread per connection.** The thread-per-connection echo service costs one thread and about "
+  f"{f0(idle2000['kb_per_conn'])} KB per client and is limited by thread switching under the interpreter lock. `--echo-io selectors` serves the same protocol from one "
+  f"thread that waits on all sockets at once (kqueue/epoll), keeps a small input and output buffer per connection, closes idle clients from a periodic sweep, and stops "
+  f"reading from a client whose unsent replies exceed 4 MiB (back-pressure). All echo tests pass against both implementations.")
+table(["Measure", "Thread per connection", "selectors event loop"],
+      [["Server RSS, 2,000 idle connections", f"{f1(EL_T[2000]['rss_mb'])} MB", f"{f1(EL_S[2000]['rss_mb'])} MB"],
+       ["Memory per idle connection", f"{f1(EL_T[2000]['kb_per_conn'])} KB", f"{f1(EL_S[2000]['kb_per_conn'])} KB"],
+       ["Server threads, 2,000 idle connections", EL_T[2000]["threads"], EL_S[2000]["threads"]],
+       ["Throughput, 10 clients", f"{f0(LD_T[10]['req_per_s'])} req/s", f"{f0(LD_S[10]['req_per_s'])} req/s"],
+       ["Throughput, 200 clients", f"{f0(LD_T[200]['req_per_s'])} req/s", f"{f0(LD_S[200]['req_per_s'])} req/s"],
+       ["p95 latency, 200 clients", f"{f2(LD_T[200]['p95_ms'])} ms", f"{f2(LD_S[200]['p95_ms'])} ms"],
+       ["Server CPU time per request, 200 clients", f"{us_per_req(LD_T[200]):.1f} µs", f"{us_per_req(LD_S[200]):.1f} µs"],
+       ["Single client p95", f"{f3(LD_T[1]['p95_ms'])} ms", f"{f3(LD_S[1]['p95_ms'])} ms"]],
+      widths=[2.6, 1.8, 1.8], cap="Thread-per-connection versus event-loop echo service", size=9.5, label="eventloop")
+figure("fig_eventloop.png", 6.6, "Memory, throughput and p95 latency of the two concurrency models", label="fig_eventloop")
+P(f"The event loop needs about {f1(max(EL_S[2000]['kb_per_conn'], 0.1))} KB per idle connection instead of {f1(EL_T[2000]['kb_per_conn'])} KB, so memory no longer limits the "
+  f"number of clients (the C10K argument [11]), and it serves {LD_S[200]['req_per_s'] / LD_T[200]['req_per_s']:.1f}× the requests at 200 clients with "
+  f"{us_per_req(LD_T[200]) / us_per_req(LD_S[200]):.1f}× less CPU per request, because there are no thread switches and no lock hand-offs between hundreds of threads. "
+  f"With one client the two models are within {abs(1 - LD_S[1]['req_per_s'] / LD_T[1]['req_per_s']) * 100:.0f}% of each other, since there is nothing to multiplex. The price is code complexity: partial reads, partial writes, buffering and "
+  f"time-outs that the blocking thread model gets for free must be written by hand, and one slow handler would stall every client, which is why the file service "
+  f"(disk I/O, hashing) keeps a thread per connection.")
 P("**Threats to validity.** All traffic is on loopback, so there is no propagation delay, queueing in routers, MTU fragmentation or real loss; absolute numbers will be lower on a real network and "
   "the *relative* conclusions (TCP versus UDP behaviour, effect of retries, effect of optimisations) are the findings to rely on. Client and server share CPU cores, and the Python load generators "
   "contribute their own latency. Results come from one machine and one session.")
@@ -674,7 +776,18 @@ bullets([
     f"A crashed server is detected in {E7['crashed_server']['detected_after_s'] * 1000:.2f} ms, a hung one at the configured timeout ({f3(E7['hung_server']['detected_after_s'])} s for 1.0 s), and a dead UDP peer only after the retry budget ({f3(E7['udp_dead_server']['detected_after_s'])} s).",
     f"**Resources.** Idle server RSS is {f1(idle0['rss_mb'])} MB; each open connection adds ≈{f1(idle2000['kb_per_conn'])} KB and one thread; server CPU follows load (1% at 1 client, ≈{f0(by(E2, 'clients', 50)['cpu_pct'])}% at 50). "
     f"Memory under 400 active clients is {f1(c400['rss_peak_mb'])} MB.",
-])
+    f"**Concurrency model.** A `selectors` event loop held 2,000 idle connections in {f1(EL_S[2000]['rss_mb'])} MB (versus {f1(EL_T[2000]['rss_mb'])} MB with a thread each) and "
+    f"served {f0(LD_S[200]['req_per_s'])} versus {f0(LD_T[200]['req_per_s'])} req/s at 200 clients ({REF['eventloop']}). *Inference:* for many mostly idle clients, an event loop "
+    f"scales where thread-per-connection does not; threads remain simpler for handlers that block on disk.",
+    "**DNS transport.** A 40-record answer does not fit the 512-byte UDP limit; the server sets TC and the client transparently retries over TCP, receiving all 40 records "
+    "(verified also with `dig +tcp`). *Inference:* UDP is the fast path, TCP the fallback for large answers – the same division real resolvers use.",
+    f"**Security cost.** TLS 1.3 adds {T12['connect_ping']['p50_ms'] - P12['connect_ping']['p50_ms']:.2f} ms per new connection and lowers loopback throughput by "
+    f"{(1 - T12['download_MBps'] / P12['download_MBps']) * 100:.0f}–{(1 - T12['upload_MBps'] / P12['upload_MBps']) * 100:.0f}% ({REF['tls']}); authentication failures and plaintext clients are rejected and logged.",
+    f"**Timeouts are a trade-off.** With {E13['delay_ms']} ± {E13['jitter_ms']} ms RTT a timeout shorter than the RTT caused "
+    f"{(D13[0.0]['fixed20']['datagrams_per_query'] - 1) * 100:.0f}% spurious retransmissions with no loss at all; the adaptive RTO avoided them, but its back-off made it slower than a fixed "
+    f"timeout under heavy random loss ({REF['delay_rto']}).",
+] + ([f"**On the wire.** The tcpdump capture confirms the behaviour at packet level: SYN/SYN,ACK/ACK before every TCP exchange, DNS retransmissions re-using the transaction ID, "
+      f"and a truncated UDP answer followed by a TCP query ({REF['cap_hs']})."] if CAP else []))
 H2("b. Innovation, Novelty, and Evidence")
 table(["Contribution", "What is new / non-trivial", "Evidence in this report"],
       [["Real DNS wire-format server in the same platform as echo and file services", "Hand-written RFC 1035 codec with name compression, CNAME chasing, NODATA/NXDOMAIN, TC handling, FORMERR/NOTIMP, loop-safe parser; forwarding resolver with TTL cache", f"Interoperates with `dig` ({REF['term_dns.png']}, test `matches_system_dig`); {sum('TestDNS' in t['id'] for t in T['tests'])} DNS tests"],
@@ -684,8 +797,13 @@ table(["Contribution", "What is new / non-trivial", "Evidence in this report"],
        ["Measured, root-caused optimisations", "Found a download/upload asymmetry through measurement, explained it (double file read), fixed it with a safe digest cache, and quantified `sendfile()`", f"+{(dl_dc100 / dl_base100 - 1) * 100:.0f}% download throughput; {c8[3]['cpu_pct'] / c8[0]['cpu_pct'] * 100:.0f}% CPU at 8 clients ({REF['file_conc']}, {REF['fig_files.png']})"],
        ["Adaptive retransmission timer", "RFC 6298 estimator (SRTT/RTTVAR, Karn’s rule, exponential back-off) applied to UDP request/response", f"Same success, {min(RTO_SPEEDUP):.1f}–{max(RTO_SPEEDUP):.1f}× lower latency ({REF['rto']}, {REF['fig_rto.png']})"],
        ["Pre-fork multi-process mode", "Shared listening sockets across processes break the one-core GIL ceiling for TCP; the UDP regression is measured and explained", f"Echo {W6['echo_50']['req_per_s'] / W1['echo_50']['req_per_s']:.1f}–{W6['echo_200']['req_per_s'] / W1['echo_200']['req_per_s']:.1f}× throughput ({REF['workers']})"],
+       ["Event-loop server", "Single-threaded `selectors` echo service with buffering, back-pressure and idle sweep, tested against the same suite as the threaded one", f"{f1(EL_S[2000]['kb_per_conn'])} vs {f1(EL_T[2000]['kb_per_conn'])} KB per connection; {LD_S[200]['req_per_s'] / LD_T[200]['req_per_s']:.1f}× throughput ({REF['eventloop']})"],
+       ["DNS over TCP with TC fallback", "Same resolver serves UDP and TCP; large answers set TC, the client retries over TCP; pipelined queries (RFC 7766)", "Tests + `dig +tcp` interoperability"],
+       ["TLS 1.3 + token authentication", "Per-connection TLS in the handler thread, certificate verification, constant-time token check, brute-force limit", f"Measured cost ({REF['tls']}); 5 security tests"],
+       ["Network delay emulation", "Timer-queue delay/jitter on UDP replies (no blocked workers) to evaluate timeouts on a realistic RTT", f"Spurious-retransmission and back-off trade-off ({REF['delay_rto']})"],
        ["Honest scalability analysis", "Connection-burst limit, GIL ceiling, per-connection memory and thread cap all measured and explained", f"{REF['conc']}, {REF['idle']}; Section 9.e"],
-       ["Observability", "`STATS` command returns live counters, CPU and memory; key=value logs are machine-parseable", f"{REF['term_concurrency.png']}, {REF['term_log.png']}"]],
+       ["Observability", "`STATS` command returns live counters, CPU and memory; key=value logs are machine-parseable", f"{REF['term_concurrency.png']}, {REF['term_log.png']}"]]
+      + ([["Packet-level verification without Wireshark dependencies", "Stand-alone pcap/IPv4/TCP/UDP/DNS decoder that extracts handshakes, retransmissions and TC fallback from a tcpdump capture", f"{REF['cap_hs']}, {REF['term_capture.png']}"]] if CAP else []),
       widths=[1.7, 2.7, 2.0], cap="Innovation and evidence summary", size=9)
 
 # =============================================================================== 11 Conclusion
@@ -695,27 +813,32 @@ P("The project achieved its objectives. A single server process provides Echo (T
   "The evaluation produced quantitative answers on all five required metrics, and the loss experiments validate a simple analytical model, which turns retransmission policy into an engineering calculation instead of a guess.")
 P("Two lessons stand out. First, *measurement exposes problems that reading code does not*: the upload/download asymmetry and the connection-burst failure were both found by benchmarks and both led to concrete changes. "
   "Second, *the choice between TCP and UDP is about who carries the reliability burden*: TCP hides loss at the cost of connection state and set-up time; UDP is cheaper per exchange but the application must "
-  "supply timeouts and retries, and the data show exactly how many are needed.")
+  "supply timeouts and retries, and the data show exactly how many are needed. A third lesson came from the timeout experiments: "
+  "the policy that is best for one client’s latency (retransmit quickly) is the worst for a shared network, which is why the standards choose back-off.")
 
 # =============================================================================== 12 Limitations
 H1("12. Limitations and Future Enhancement")
 H3("Limitations")
 bullets([
-    "Measurements are on the loopback interface only; real networks add latency, jitter, queueing, MTU effects and genuine loss.",
-    "A single server process is bounded by the interpreter’s single-core execution (≈29k echo requests/s); `--workers N` lifts this for TCP but slows the shared-socket UDP services. Thread and memory limits also apply (≈54 KB per connection; ≈4,000 threads per process on this macOS machine).",
+    "Measurements are on the loopback interface of one machine; delay and loss are emulated, so real queueing, MTU effects and congestion are not present.",
+    f"In threaded mode a single server process is bounded by the interpreter’s single-core execution (≈{f0(sum(plateau) / len(plateau) / 1000)}k echo requests/s) and by "
+    f"≈{f0(idle2000['kb_per_conn'])} KB and one thread per connection (≈4,000 threads per process on this macOS machine). `--workers N` and the event loop lift these limits for TCP echo; "
+    f"`--workers N` slows the shared-socket UDP services.",
     "A burst of more than roughly 200 simultaneous new connections can overflow the kernel accept queue (default `somaxconn` 128).",
-    "No encryption or authentication: any client that can reach the ports can read, write and list files.",
-    "The DNS service is authoritative only: no recursion (apart from simple forwarding), no EDNS0, no DNS over TCP for truncated answers, no DNSSEC, no wildcard records.",
+    "TLS and token authentication protect only the file service; echo and DNS are unauthenticated, as their real-world counterparts usually are. The token is a single shared secret, not per-user accounts.",
+    "The DNS service is authoritative only: no recursion (apart from simple forwarding), no EDNS0, no DNSSEC, no wildcard records.",
+    "Delay and loss are emulated inside the server for UDP; TCP traffic is never delayed or dropped, so TCP congestion control is not exercised.",
+    "The event-loop model is implemented for the echo service only; the file service and DNS-over-TCP keep a thread per connection.",
     "The file service has no resume, quotas or directories. The adaptive UDP timeout uses a 5 ms floor tuned for a LAN, not the 1 s minimum RFC 6298 recommends for the open Internet.",
 ])
 H3("Future enhancements")
 bullets([
-    "Run the same experiments across two hosts or with Linux `tc netem` / Mininet to add real delay and loss, and capture traffic with Wireshark to confirm the packet-level behaviour.",
-    "Add TLS (`ssl`) and token-based authentication; per-client rate limiting.",
-    "Raise `kern.ipc.somaxconn` and the listen backlog; replace thread-per-connection with an `asyncio` or `epoll` event loop, or several processes sharing a port with `SO_REUSEPORT`, and measure the effect.",
-    "Per-destination RTT estimators shared across requests; DNS over TCP, EDNS0 and negative caching.",
+    "Run the experiments across two hosts or with Linux `tc netem` / Mininet so that TCP traffic also sees real delay and loss.",
+    "Per-user credentials and rate limiting; TLS for DNS (DNS over TLS, RFC 7858).",
+    "Raise `kern.ipc.somaxconn`; move the file service onto the event loop with non-blocking disk I/O, and combine the event loop with `SO_REUSEPORT` workers on Linux.",
+    "Per-destination RTT estimators shared across requests; EDNS0 and negative caching.",
     "Resumable, chunked file transfer with parallel streams; compare TCP congestion-control algorithms (Cubic, BBR) on the transfer service.",
-    "Export metrics in Prometheus format and add a small dashboard.",
+    "Export metrics in Prometheus format.",
 ])
 
 # =============================================================================== References
@@ -735,6 +858,10 @@ refs = [
     "V. Paxson, M. Allman, J. Chu, M. Sargent, “Computing TCP’s Retransmission Timer,” RFC 6298, 2011.",
     "Python Software Foundation, “socket – Low-level networking interface” and “threading”, Python 3 documentation. https://docs.python.org/3/library/socket.html",
     "R. Jain, *The Art of Computer Systems Performance Analysis*, Wiley, 1991.",
+    "J. Dickinson, S. Dickinson, R. Bellis, A. Mankin, D. Wessels, “DNS Transport over TCP – Implementation Requirements,” RFC 7766, 2016.",
+    "E. Rescorla, “The Transport Layer Security (TLS) Protocol Version 1.3,” RFC 8446, 2018.",
+    "The Tcpdump Group, *tcpdump* and *libpcap*. https://www.tcpdump.org",
+    "J. Lemon, “Kqueue: A generic and scalable event notification facility,” in *Proc. USENIX Annual Technical Conference, FREENIX Track*, 2001.",
 ]
 for i, r_ in enumerate(refs, 1):
     p = doc.add_paragraph()

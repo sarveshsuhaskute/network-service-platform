@@ -1,0 +1,15 @@
+[e11] threads vs event loop
+  threads: idle 0->26MB/12thr, 500->45MB/512thr, 1000->63MB/1012thr, 2000->100MB/2012thr | load 1c 14,209/s p95=0.11 cpu=0%, 10c 28,821/s p95=0.65 cpu=19%, 50c 28,595/s p95=3.42 cpu=74%, 200c 23,411/s p95=16.67 cpu=177%
+  selectors: idle 0->26MB/11thr, 500->26MB/11thr, 1000->27MB/11thr, 2000->28MB/11thr | load 1c 14,331/s p95=0.11 cpu=0%, 10c 81,224/s p95=0.21 cpu=2%, 50c 63,353/s p95=1.61 cpu=10%, 200c 56,035/s p95=7.76 cpu=25%
+    done in 37.8s
+[e12] TLS cost
+  plain: connect+PING p50=0.169 ms  up=1302 MB/s down=1306 MB/s cpu=49%
+  tls: connect+PING p50=1.096 ms  up=820 MB/s down=934 MB/s cpu=63%
+    done in 2.5s
+[e13] adaptive RTO under emulated delay
+  loss=0.0 fixed50: succ=1.000 mean=23.7ms dgram/q=1.00 rto=50.0 | fixed20: succ=1.000 mean=21.7ms dgram/q=1.69 rto=20.0 | adaptive: succ=1.000 mean=23.7ms dgram/q=1.00 rto=31.2
+  loss=0.1 fixed50: succ=1.000 mean=35.1ms dgram/q=1.22 rto=50.0 | fixed20: succ=1.000 mean=26.4ms dgram/q=1.94 rto=20.0 | adaptive: succ=1.000 mean=34.3ms dgram/q=1.22 rto=35.4
+  loss=0.2 fixed50: succ=0.995 mean=52.7ms dgram/q=1.57 rto=50.0 | fixed20: succ=0.990 mean=33.9ms dgram/q=2.40 rto=20.0 | adaptive: succ=0.995 mean=60.0ms dgram/q=1.57 rto=36.8
+  loss=0.3 fixed50: succ=0.970 mean=68.1ms dgram/q=1.95 rto=50.0 | fixed20: succ=0.960 mean=39.8ms dgram/q=2.75 rto=20.0 | adaptive: succ=0.970 mean=89.4ms dgram/q=1.95 rto=31.3
+    done in 113.1s
+saved /Users/sarveshkute/Downloads/CN/results/benchmarks.json

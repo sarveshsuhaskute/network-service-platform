@@ -10,7 +10,6 @@ import collections
 import json
 import logging
 import os
-import statistics
 import tempfile
 import threading
 import time
@@ -68,13 +67,20 @@ def api_echo(b):
 
 def api_dns(b):
     name, qtype = b.get("name", "web.campus.lab").strip(), b.get("type", "A")
-    adaptive = bool(b.get("adaptive"))
-    cmd = f"python3 client.py dns {name} {qtype}" + (" --adaptive" if adaptive else "")
+    adaptive, use_tcp = bool(b.get("adaptive")), bool(b.get("tcp"))
+    cmd = f"python3 client.py dns {name} {qtype}" + (" --adaptive" if adaptive else "") + (" --tcp" if use_tcp else "")
     try:
+        if use_tcp:
+            r, secs = cl.dns_query_tcp("127.0.0.1", PLAT.ports["dns"], name, qtype)
+            out = [f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} transport=tcp time={secs * 1000:.3f} ms"]
+            out += [f"{a.name}\t{a.ttl}\tIN\t{dw.QTYPE_NAMES.get(a.rtype, a.rtype)}\t{a.value}" for a in r.answers]
+            return result(cmd, "\n".join(out), ms=secs * 1000)
         r, secs, n = cl.dns_query("127.0.0.1", PLAT.ports["dns"], name, qtype, float(b.get("timeout", 0.3)), int(b.get("retries", 2)),
                                   ESTIMATOR if adaptive else None)
         rto = f" rto={ESTIMATOR.rto() * 1000:.1f} ms" if adaptive else ""
-        out = [f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} tc={int(r.tc)} time={secs * 1000:.3f} ms attempts={n}{rto}"]
+        fb = "  (UDP answer truncated, retried over TCP)" if r.transport == "tcp" else ""
+        out = [f";; rcode={dw.RCODE_NAMES[r.rcode]} aa={int(r.aa)} transport={r.transport} time={secs * 1000:.3f} ms "
+               f"attempts={n}{rto}{fb}"]
         out += [f"{a.name}\t{a.ttl}\tIN\t{dw.QTYPE_NAMES.get(a.rtype, a.rtype)}\t{a.value}" for a in r.answers]
         return result(cmd, "\n".join(out), ms=secs * 1000)
     except Exception as e:

@@ -1,31 +1,32 @@
 ### server
 $ python3 server.py --log-file logs/demo.log --root storage
-READY {"echo": 9001, "file": 9002, "udp-echo": 9003, "dns": 9053}
-2026-10-14 14:49:46.543 | INFO    | svc=echo event=listening port=9001
-2026-10-14 14:49:46.543 | INFO    | svc=file event=listening port=9002
-2026-10-14 14:49:46.543 | INFO    | svc=udp-echo event=listening port=9003 loss_sim=0.00
-2026-10-14 14:49:46.543 | INFO    | svc=dns event=listening port=9053 loss_sim=0.00
+READY {"echo": 9001, "file": 9002, "udp-echo": 9003, "dns": 9053, "dns-tcp": 9053}
+2026-10-27 13:02:52.698 | INFO    | svc=echo event=listening port=9001
+2026-10-27 13:02:52.698 | INFO    | svc=file event=listening port=9002
+2026-10-27 13:02:52.698 | INFO    | svc=udp-echo event=listening port=9003 loss_sim=0.00 delay_ms=0.0 jitter_ms=0.0
+2026-10-27 13:02:52.699 | INFO    | svc=dns event=listening port=9053 loss_sim=0.00 delay_ms=0.0 jitter_ms=0.0
+2026-10-27 13:02:52.699 | INFO    | svc=dns-tcp event=listening port=9053
 
 ### echo
 $ python3 client.py echo hello from the client
-'hello from the client'  (0.311 ms)
+'hello from the client'  (0.368 ms)
 
 $ python3 client.py udp-echo datagram payload
-'datagram payload'  (0.272 ms, 1 attempt(s))
+'datagram payload'  (0.708 ms, 1 attempt(s))
 
 ### file
 $ python3 client.py file put notes.txt
-uploaded 28 bytes in 0.002 s (0.0 MB/s), SHA-256 verified by server
+uploaded 28 bytes in 0.006 s (4.4 kB/s), SHA-256 verified by server
 
 $ python3 client.py file put report.bin
-uploaded 3000000 bytes in 0.004 s (830.9 MB/s), SHA-256 verified by server
+uploaded 3000000 bytes in 0.009 s (334.1 MB/s), SHA-256 verified by server
 
 $ python3 client.py file list
           28  notes.txt
      3000000  report.bin
 
 $ python3 client.py file get report.bin report.copy
-downloaded 3000000 bytes in 0.004 s (825.6 MB/s), SHA-256 verified
+downloaded 3000000 bytes in 0.004 s (703.5 MB/s), SHA-256 verified
 
 $ cmp report.bin report.copy
 files are identical
@@ -38,26 +39,26 @@ error: ServiceError: ERR 404 no such file
 
 ### dns
 $ python3 client.py dns web.campus.lab
-;; rcode=NOERROR aa=1 tc=0 time=0.351 ms attempts=1
+;; rcode=NOERROR aa=1 transport=udp time=0.586 ms attempts=1
 web.campus.lab	300	IN	A	10.10.0.10
 web.campus.lab	300	IN	A	10.10.0.11
 
 $ python3 client.py dns www.campus.lab
-;; rcode=NOERROR aa=1 tc=0 time=0.356 ms attempts=1
+;; rcode=NOERROR aa=1 transport=udp time=0.435 ms attempts=1
 www.campus.lab	300	IN	CNAME	web.campus.lab
 web.campus.lab	300	IN	A	10.10.0.10
 web.campus.lab	300	IN	A	10.10.0.11
 
 $ python3 client.py dns campus.lab MX
-;; rcode=NOERROR aa=1 tc=0 time=0.371 ms attempts=1
+;; rcode=NOERROR aa=1 transport=udp time=0.400 ms attempts=1
 campus.lab	300	IN	MX	10 mail.campus.lab
 
 $ python3 client.py dns nosuchhost.campus.lab
-;; rcode=NXDOMAIN aa=1 tc=0 time=0.264 ms attempts=1
+;; rcode=NXDOMAIN aa=1 transport=udp time=0.744 ms attempts=1
 
 $ dig @127.0.0.1 -p 9053 +noall +comments +answer www.campus.lab
 ;; Got answer:
-;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 15897
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 6063
 ;; flags: qr aa rd; QUERY: 1, ANSWER: 3, AUTHORITY: 0, ADDITIONAL: 0
 ;; WARNING: recursion requested but not available
 
@@ -67,6 +68,16 @@ web.campus.lab.		300	IN	A	10.10.0.10
 web.campus.lab.		300	IN	A	10.10.0.11
 
 
+$ python3 client.py dns big.campus.lab
+;; rcode=NOERROR aa=1 transport=tcp time=2.745 ms attempts=1  (UDP answer truncated, retried over TCP)
+big.campus.lab	300	IN	A	10.20.0.1
+big.campus.lab	300	IN	A	10.20.0.2
+big.campus.lab	300	IN	A	10.20.0.3
+   ... (40 A records in total)
+
+$ dig +tcp +short @127.0.0.1 -p 9053 big.campus.lab | wc -l
+      40
+
 ### concurrency
 $ 20 clients in parallel, each sending 5 echo messages
 all clients finished
@@ -74,14 +85,22 @@ all clients finished
 $ python3 client.py file stats
 {
   "active": {
+    "dns-tcp": 0,
     "echo": 0,
     "file": 1
   },
   "counters": {
-    "dns.datagrams_in": 5,
-    "dns.datagrams_out": 5,
-    "dns.rcode.NOERROR": 4,
+    "dns-tcp.bytes_in": 79,
+    "dns-tcp.bytes_out": 1348,
+    "dns-tcp.connections": 2,
+    "dns-tcp.requests": 2,
+    "dns.datagrams_in": 6,
+    "dns.datagrams_out": 6,
+    "dns.rcode.NOERROR": 7,
     "dns.rcode.NXDOMAIN": 1,
+    "dns.tcp_queries": 2,
+    "dns.truncated": 1,
+    "dns.udp_queries": 6,
     "echo.bytes_in": 1880,
     "echo.bytes_out": 1880,
     "echo.connections": 101,
@@ -89,19 +108,21 @@ $ python3 client.py file stats
     "file.bytes_in": 3000285,
     "file.bytes_out": 3000276,
     "file.connections": 7,
+    "file.digest_cache_hits": 1,
     "file.requests": 12,
     "udp-echo.datagrams_in": 1,
     "udp-echo.datagrams_out": 1
   },
-  "cpu_sys_s": 0.046279999999999995,
-  "cpu_user_s": 0.07317599999999999,
-  "maxrss_bytes": 29753344,
+  "cpu_sys_s": 0.066367,
+  "cpu_user_s": 0.10553399999999999,
+  "maxrss_bytes": 27869184,
   "peak_active": {
-    "echo": 7,
+    "dns-tcp": 1,
+    "echo": 3,
     "file": 1
   },
-  "threads": 10,
-  "uptime_s": 2.133
+  "threads": 14,
+  "uptime_s": 3.147
 }
 
 ### failure
@@ -112,22 +133,50 @@ $ path-traversal and malformed DNS packet
 b'ERR 400 invalid file name\n'
 DNS reply rcode = 1 (1 = FORMERR)
 
+### tls
+$ tools/make_cert.sh certs && python3 server.py --file-port 9102 ... --tls-cert certs/server.crt --tls-key certs/server.key --auth-token lab-token
+$ python3 client.py file --port 9102 --tls --cafile server.crt --token lab-token put notes.txt
+;; TLSv1.3 connection, server certificate verified
+uploaded 28 bytes in 0.001 s (45.9 kB/s), SHA-256 verified by server
+
+$ python3 client.py file --port 9102 --tls --cafile server.crt --token lab-token list
+;; TLSv1.3 connection, server certificate verified
+          28  notes.txt
+
+$ python3 client.py file --port 9102 --tls --cafile server.crt --token wrong-token list
+error: ServiceError: ERR 401 invalid token
+
+$ python3 client.py file --port 9102 --tls --cafile server.crt list
+;; TLSv1.3 connection, server certificate verified
+error: ServiceError: ERR 401 authentication required
+
+$ python3 client.py file --port 9102 --tls list
+error: SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1144)
+
 ### log
-$ grep -E 'event=(put|get|list|query|aborted|malformed)|WARNING' logs/demo.log | tail -n 22
-2026-10-14 14:49:46.543 | INFO    | svc=echo event=listening port=9001
-2026-10-14 14:49:46.543 | INFO    | svc=file event=listening port=9002
-2026-10-14 14:49:46.543 | INFO    | svc=udp-echo event=listening port=9003 loss_sim=0.00
-2026-10-14 14:49:46.543 | INFO    | svc=dns event=listening port=9053 loss_sim=0.00
-2026-10-14 14:49:47.656 | INFO    | svc=file client=127.0.0.1:55638 event=put name=notes.txt bytes=28 dur_ms=2.2
-2026-10-14 14:49:47.699 | INFO    | svc=file client=127.0.0.1:55639 event=put name=report.bin bytes=3000000 dur_ms=3.5
-2026-10-14 14:49:47.737 | INFO    | svc=file client=127.0.0.1:55640 event=list files=2
-2026-10-14 14:49:47.777 | INFO    | svc=file client=127.0.0.1:55641 event=get name=report.bin bytes=3000000 dur_ms=2.7
-2026-10-14 14:49:47.859 | INFO    | svc=file client=127.0.0.1:55643 event=get name=missing.txt result=not_found
-2026-10-14 14:49:47.895 | INFO    | svc=dns client=127.0.0.1:57938 event=query name=web.campus.lab type=A rcode=NOERROR dur_us=28
-2026-10-14 14:49:47.931 | INFO    | svc=dns client=127.0.0.1:64202 event=query name=www.campus.lab type=A rcode=NOERROR dur_us=30
-2026-10-14 14:49:47.968 | INFO    | svc=dns client=127.0.0.1:49911 event=query name=campus.lab type=MX rcode=NOERROR dur_us=20
-2026-10-14 14:49:48.004 | INFO    | svc=dns client=127.0.0.1:57684 event=query name=nosuchhost.campus.lab type=A rcode=NXDOMAIN dur_us=15
-2026-10-14 14:49:48.012 | INFO    | svc=dns client=127.0.0.1:55463 event=query name=www.campus.lab type=A rcode=NOERROR dur_us=23
-2026-10-14 14:49:48.698 | WARNING | svc=file client=127.0.0.1:55745 event=aborted detail=upload of half.bin aborted with 999000 bytes missing
-2026-10-14 14:49:49.054 | WARNING | svc=dns client=127.0.0.1:55406 event=malformed detail=QDCOUNT=5 unsupported
+$ grep -E 'event=(put|get|list|query|aborted|malformed|auth|tls_established|tls_error)|WARNING' logs/demo.log | tail -n 24
+2026-10-27 13:02:54.361 | INFO    | svc=dns client=127.0.0.1:58193 transport=udp event=query name=www.campus.lab type=A rcode=NOERROR dur_us=50
+2026-10-27 13:02:54.443 | INFO    | svc=dns client=127.0.0.1:50720 transport=udp event=query name=campus.lab type=MX rcode=NOERROR dur_us=34
+2026-10-27 13:02:54.505 | INFO    | svc=dns client=127.0.0.1:62166 transport=udp event=query name=nosuchhost.campus.lab type=A rcode=NXDOMAIN dur_us=53
+2026-10-27 13:02:54.523 | INFO    | svc=dns client=127.0.0.1:64216 transport=udp event=query name=www.campus.lab type=A rcode=NOERROR dur_us=56
+2026-10-27 13:02:54.573 | INFO    | svc=dns client=127.0.0.1:60005 transport=udp event=query name=big.campus.lab type=A rcode=NOERROR tc=1 dur_us=46
+2026-10-27 13:02:54.575 | INFO    | svc=dns client=127.0.0.1:63005 transport=tcp event=query name=big.campus.lab type=A rcode=NOERROR dur_us=40
+2026-10-27 13:02:54.599 | INFO    | svc=dns client=127.0.0.1:63006 transport=tcp event=query name=big.campus.lab type=A rcode=NOERROR dur_us=70
+2026-10-27 13:02:55.886 | WARNING | svc=file client=127.0.0.1:63108 event=aborted detail=upload of half.bin aborted with 999000 bytes missing
+2026-10-27 13:02:56.285 | WARNING | svc=dns client=127.0.0.1:57374 transport=udp event=malformed detail=QDCOUNT=5 unsupported
+2026-10-27 13:02:56.406 | INFO    | svc=echo event=listening port=9101
+2026-10-27 13:02:56.406 | INFO    | svc=file event=listening port=9102
+2026-10-27 13:02:56.406 | INFO    | svc=udp-echo event=listening port=9103 loss_sim=0.00 delay_ms=0.0 jitter_ms=0.0
+2026-10-27 13:02:56.406 | INFO    | svc=dns event=listening port=9153 loss_sim=0.00 delay_ms=0.0 jitter_ms=0.0
+2026-10-27 13:02:56.407 | INFO    | svc=dns-tcp event=listening port=9153
+2026-10-27 13:02:57.419 | INFO    | svc=file client=127.0.0.1:63110 event=tls_established version=TLSv1.3 cipher=TLS_AES_256_GCM_SHA384
+2026-10-27 13:02:57.420 | INFO    | svc=file client=127.0.0.1:63110 event=auth result=ok
+2026-10-27 13:02:57.420 | INFO    | svc=file client=127.0.0.1:63110 event=put name=notes.txt bytes=28 dur_ms=0.5
+2026-10-27 13:02:57.506 | INFO    | svc=file client=127.0.0.1:63111 event=tls_established version=TLSv1.3 cipher=TLS_AES_256_GCM_SHA384
+2026-10-27 13:02:57.506 | INFO    | svc=file client=127.0.0.1:63111 event=auth result=ok
+2026-10-27 13:02:57.507 | INFO    | svc=file client=127.0.0.1:63111 event=list files=1
+2026-10-27 13:02:57.569 | INFO    | svc=file client=127.0.0.1:63112 event=tls_established version=TLSv1.3 cipher=TLS_AES_256_GCM_SHA384
+2026-10-27 13:02:57.569 | WARNING | svc=file client=127.0.0.1:63112 event=auth result=denied attempt=1
+2026-10-27 13:02:57.635 | INFO    | svc=file client=127.0.0.1:63113 event=tls_established version=TLSv1.3 cipher=TLS_AES_256_GCM_SHA384
+2026-10-27 13:02:57.727 | WARNING | svc=file client=127.0.0.1:63114 event=tls_error detail=[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1144)
 
